@@ -25,9 +25,10 @@ type ObjectName struct {
 }
 
 type WorkerSpec struct {
-	Profile string      `yaml:"profile" json:"profile"`
-	Image   string      `yaml:"image" json:"image"`
-	Trigger HTTPTrigger `yaml:"trigger" json:"trigger"`
+	Profile    string      `yaml:"profile" json:"profile"`
+	Image      string      `yaml:"image" json:"image"`
+	Trigger    HTTPTrigger `yaml:"trigger" json:"trigger"`
+	JobEnabled bool        `yaml:"jobEnabled,omitempty" json:"jobEnabled,omitempty"`
 }
 
 type HTTPTrigger struct {

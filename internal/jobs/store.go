@@ -1,0 +1,260 @@
+package jobs
+
+import (
+	"context"
+	_ "embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/imprun/worker-platform/internal/platform"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+//go:embed schema.sql
+var schemaSQL string
+
+type Store struct {
+	pool      *pgxpool.Pool
+	namespace string
+}
+
+func Open(ctx context.Context, dsn, namespace string) (*Store, error) {
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, errors.New("invalid PostgreSQL DSN")
+	}
+	config.ConnConfig.ConnectTimeout = 5 * time.Second
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return nil, errors.New("configure PostgreSQL pool")
+	}
+	err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(1230002533, 1)"); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, schemaSQL)
+		return err
+	})
+	if err != nil {
+		pool.Close()
+		return nil, errors.New("initialize PostgreSQL Job schema")
+	}
+	return &Store{pool: pool, namespace: namespace}, nil
+}
+
+func (s *Store) Close() { s.pool.Close() }
+
+func (s *Store) RecordRevision(ctx context.Context, workerUID, revision string, snapshot platform.JobRevision) error {
+	cfg, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO wp_job_revisions (worker_uid, revision, snapshot) VALUES ($1, $2, $3::jsonb)
+			ON CONFLICT (worker_uid, revision) DO NOTHING
+		`, workerUID, revision, cfg); err != nil {
+			return err
+		}
+		var uid string
+		err := tx.QueryRow(ctx, `
+			SELECT snapshot->>'templateUID' FROM wp_job_revisions WHERE worker_uid=$1 AND revision=$2
+		`, workerUID, revision).Scan(&uid)
+		if err != nil {
+			return err
+		}
+		if uid != snapshot.TemplateUID {
+			return errors.New("published Job revision has a different ActorTemplate UID")
+		}
+		return nil
+	})
+}
+
+func scanRun(row pgx.Row, result *Run, extra ...any) error {
+	targets := []any{&result.ID, &result.Worker, &result.Revision, &result.State, &result.Reason, &result.CreatedAt, &result.DeadlineAt}
+	return row.Scan(append(targets, extra...)...)
+}
+
+const runFields = "id::text, worker, revision, state, reason, created_at, deadline_at"
+const attemptFields = "number, state, actor_space, actor_name, actor_uid, worker_id, worker_pod_uid, reason, created_at"
+
+func scanAttempt(row pgx.Row, attempt *Attempt) error {
+	return row.Scan(&attempt.Number, &attempt.State, &attempt.ActorSpace, &attempt.Actor, &attempt.ActorUID,
+		&attempt.WorkerID, &attempt.WorkerPodUID, &attempt.Reason, &attempt.CreatedAt)
+}
+
+func (s *Store) Admit(ctx context.Context, worker string, publication Publication, key string, input json.RawMessage) (Run, error) {
+	var run Run
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		replay := func() (bool, error) {
+			var same bool
+			err := scanRun(tx.QueryRow(ctx, `
+				SELECT `+runFields+`, input=$4::jsonb FROM wp_job_runs
+				WHERE namespace=$1 AND worker_uid=$2 AND idempotency_key=$3
+			`, s.namespace, publication.WorkerUID, key, input), &run, &same)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, nil
+			}
+			if err == nil && !same {
+				err = ErrInputConflict
+			}
+			return err == nil, err
+		}
+		if found, err := replay(); found || err != nil {
+			return err
+		}
+		if publication.Revision == "" {
+			return ErrNotPublished
+		}
+		err := scanRun(tx.QueryRow(ctx, `
+			INSERT INTO wp_job_runs (namespace, worker, worker_uid, revision, idempotency_key, input, deadline_at)
+			SELECT $1, $2, worker_uid, revision, $5, $6::jsonb, clock_timestamp()+make_interval(secs => $7)
+			FROM wp_job_revisions WHERE worker_uid=$3 AND revision=$4
+			ON CONFLICT (worker_uid, idempotency_key) DO NOTHING
+			RETURNING `+runFields, s.namespace, worker, publication.WorkerUID, publication.Revision, key, input, runLifetime.Seconds()), &run)
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if found, err := replay(); found || err != nil {
+			return err
+		}
+		return ErrNotPublished
+	})
+	if invalidJSON(err) {
+		err = ErrInvalidJSON
+	}
+	return run, err
+}
+
+func (s *Store) Get(ctx context.Context, id string) (Run, error) {
+	run := Run{Attempts: []Attempt{}}
+	options := pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}
+	err := pgx.BeginTxFunc(ctx, s.pool, options, func(tx pgx.Tx) error {
+		err := scanRun(tx.QueryRow(ctx, "SELECT "+runFields+" FROM wp_job_runs WHERE namespace=$1 AND id=$2", s.namespace, id), &run)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, "SELECT "+attemptFields+" FROM wp_job_attempts WHERE run_id=$1 ORDER BY number", id)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var attempt Attempt
+			if err := scanAttempt(rows, &attempt); err != nil {
+				return err
+			}
+			run.Attempts = append(run.Attempts, attempt)
+		}
+		return rows.Err()
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = ErrNotFound
+	}
+	return run, err
+}
+
+func (s *Store) Result(ctx context.Context, id string) (string, json.RawMessage, error) {
+	var state string
+	var result json.RawMessage
+	err := s.pool.QueryRow(ctx, `
+		SELECT r.state, v.value FROM wp_job_runs r LEFT JOIN wp_job_results v ON v.run_id=r.id
+		WHERE r.namespace=$1 AND r.id=$2
+	`, s.namespace, id).Scan(&state, &result)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, ErrNotFound
+	}
+	if err == nil && state == succeeded && result == nil {
+		return "", nil, errors.New("successful Run is missing its result")
+	}
+	return state, result, err
+}
+
+func (s *Store) claim(ctx context.Context) (claim, error) {
+	var job claim
+	var snapshot []byte
+	err := s.pool.QueryRow(ctx, `
+		WITH candidate AS (
+			SELECT id FROM wp_job_runs WHERE namespace=$1
+				AND state IN ('QUEUED', 'STARTING', 'RUNNING', 'RELEASING')
+				AND due_at<=clock_timestamp() AND (lease_until IS NULL OR lease_until<=clock_timestamp())
+			ORDER BY due_at, created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
+		), claimed AS (
+			UPDATE wp_job_runs r SET lease_id=gen_random_uuid(), lease_until=clock_timestamp()+make_interval(secs => $2)
+			FROM candidate c WHERE r.id=c.id RETURNING r.*
+		)
+		SELECT c.id::text, c.lease_id::text, c.state, c.attempt_no, c.deadline_at, c.input, v.snapshot
+		FROM claimed c JOIN wp_job_revisions v USING (worker_uid, revision)
+	`, s.namespace, leaseLifetime.Seconds()).Scan(&job.id, &job.leaseID, &job.state, &job.number, &job.deadline, &job.input, &snapshot)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return claim{}, nil
+	}
+	if err != nil {
+		return claim{}, err
+	}
+	return job, json.Unmarshal(snapshot, &job.revision)
+}
+
+func (s *Store) renew(ctx context.Context, job claim) error {
+	changed, err := s.pool.Exec(ctx, `
+		UPDATE wp_job_runs SET lease_until=clock_timestamp()+make_interval(secs => $3)
+		WHERE id=$1 AND lease_id=$2 AND lease_until>clock_timestamp()
+	`, job.id, job.leaseID, leaseLifetime.Seconds())
+	return requireRow(changed, err)
+}
+
+func (s *Store) yield(ctx context.Context, job claim, delay time.Duration) error {
+	changed, err := s.pool.Exec(ctx, `
+		UPDATE wp_job_runs SET lease_id=NULL, lease_until=NULL, due_at=clock_timestamp()+make_interval(secs => $3)
+		WHERE id=$1 AND lease_id=$2 AND lease_until>clock_timestamp()
+	`, job.id, job.leaseID, delay.Seconds())
+	return requireRow(changed, err)
+}
+
+func (s *Store) fenced(ctx context.Context, job claim, fn func(pgx.Tx) error) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var id string
+		err := tx.QueryRow(ctx, `SELECT id::text FROM wp_job_runs
+			WHERE id=$1 AND lease_id=$2 AND lease_until>clock_timestamp() FOR UPDATE`, job.id, job.leaseID).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errLeaseLost
+		}
+		if err != nil {
+			return err
+		}
+		return fn(tx)
+	})
+}
+
+func requireRow(changed pgconn.CommandTag, err error) error {
+	if err == nil && changed.RowsAffected() != 1 {
+		return errLeaseLost
+	}
+	return err
+}
+
+func invalidJSON(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	switch pgErr.Code {
+	case "22P02", "22P05", "22003", "22021":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Store) activeAttempt(ctx context.Context, job claim) (Attempt, error) {
+	var attempt Attempt
+	err := scanAttempt(s.pool.QueryRow(ctx, "SELECT "+attemptFields+" FROM wp_job_attempts WHERE run_id=$1 AND number=$2", job.id, job.number), &attempt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = fmt.Errorf("Run is missing Attempt %d", job.number)
+	}
+	return attempt, err
+}

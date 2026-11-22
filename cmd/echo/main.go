@@ -45,19 +45,43 @@ func routes() http.Handler {
 	mux.HandleFunc("GET /healthz", probe)
 	mux.HandleFunc("GET /readyz", probe)
 	mux.HandleFunc("POST /invoke", echo)
+	mux.HandleFunc("POST /attempt", echoAttempt)
 	return mux
 }
 
+type echoPayload struct {
+	Message *string `json:"message"`
+}
+
 func echo(w http.ResponseWriter, r *http.Request) {
-	var payload struct {
-		Message *string `json:"message"`
-	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8*1024))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&payload) != nil || decoder.Decode(new(any)) != io.EOF || payload.Message == nil {
+	var payload echoPayload
+	if !decodeEcho(w, r, 8*1024, &payload) || payload.Message == nil {
 		http.Error(w, "expected one JSON object with a string message (8 KiB max)", http.StatusBadRequest)
 		return
 	}
+	writeEcho(w, payload)
+}
+
+func echoAttempt(w http.ResponseWriter, r *http.Request) {
+	var job struct {
+		RunID   string      `json:"runId"`
+		Attempt int         `json:"attempt"`
+		Input   echoPayload `json:"input"`
+	}
+	if !decodeEcho(w, r, 64*1024+256, &job) || job.RunID == "" || job.Attempt < 1 || job.Input.Message == nil {
+		http.Error(w, "expected a Job attempt with a string message", http.StatusBadRequest)
+		return
+	}
+	writeEcho(w, job.Input)
+}
+
+func decodeEcho(w http.ResponseWriter, r *http.Request, limit int64, value any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(value) == nil && decoder.Decode(new(any)) == io.EOF
+}
+
+func writeEcho(w http.ResponseWriter, payload echoPayload) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(payload)

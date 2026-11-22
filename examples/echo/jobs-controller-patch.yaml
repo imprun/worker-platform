@@ -1,0 +1,26 @@
+- op: add
+  path: /spec/template/spec/containers/0/args/-
+  value: -job-listen=:8084
+- op: add
+  path: /spec/template/spec/containers/0/args/-
+  value: -job-dsn-file=/etc/jobs/dsn
+- op: add
+  path: /spec/template/spec/containers/0/args/-
+  value: -job-token-file=/etc/jobs/token
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: jobs
+    mountPath: /etc/jobs
+    readOnly: true
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: jobs
+    secret:
+      secretName: worker-job-credentials
+      items:
+        - key: dsn
+          path: dsn
+        - key: token
+          path: token

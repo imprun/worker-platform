@@ -7,6 +7,8 @@ Kubernetes Gateway API로 버전이 고정된 OCI 워커를 호출하고 ATE에�
 
 **현재 `main`**의 `worker-controller`는 `kubectl apply`로 등록한 v1alpha3 `HTTPWorker`와 `WorkerProfile`을 감시해 ATE에 직접 배포합니다. Worker 배정과 Actor 준비를 확인한 뒤 동기 `POST` HTTPRoute를 게시합니다. [컨트롤러 설치·업데이트·롤백](docs/ate-controller.md)
 
+`spec.jobEnabled`를 켠 앱에는 PostgreSQL 기반 단일 Job을 접수할 수 있습니다. 재시도는 처음 접수한 리비전을 사용하고 결과는 Run ID로 조회합니다. [Job 접수·재시도 예제](docs/job-api.md)
+
 이미지 빌드, ARM64 gVisor 풀, Gateway mTLS 설정, 실제 호출을 한 흐름으로 따라 할 수 있습니다. [Echo 전체 예제](examples/echo/)
 
 | 문서 | 내용 |

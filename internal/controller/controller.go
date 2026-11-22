@@ -34,9 +34,11 @@ type Controller struct {
 	workers    dynamic.ResourceInterface
 	profiles   dynamic.ResourceInterface
 	deployment platform.ATEDeployment
+	recordJob  func(context.Context, string, string, platform.JobRevision) error
 }
 
-func Run(ctx context.Context, watchClient, client dynamic.Interface, namespace string, deployment platform.ATEDeployment) error {
+func Run(ctx context.Context, watchClient, client dynamic.Interface, namespace string, deployment platform.ATEDeployment,
+	recordJob func(context.Context, string, string, platform.JobRevision) error) error {
 	if namespace == "" {
 		return errors.New("controller namespace is required")
 	}
@@ -44,6 +46,7 @@ func Run(ctx context.Context, watchClient, client dynamic.Interface, namespace s
 		workers:    client.Resource(workersGVR).Namespace(namespace),
 		profiles:   client.Resource(profilesGVR).Namespace(namespace),
 		deployment: deployment,
+		recordJob:  recordJob,
 	}
 	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(watchClient, 0, namespace, nil)
 	workers := factory.ForResource(workersGVR).Informer()
@@ -176,6 +179,14 @@ func (c Controller) reconcile(ctx context.Context, name string) error {
 	}
 	if err != nil {
 		return errors.Join(err, c.record(ctx, worker, profile, "DeploymentPending", err.Error(), nil))
+	}
+	if result.Job != nil && c.recordJob != nil {
+		record, cancel := context.WithTimeout(ctx, 8*time.Second)
+		err := c.recordJob(record, string(worker.GetUID()), result.Revision, *result.Job)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("record runnable revision: %w", err)
+		}
 	}
 	return c.record(ctx, worker, profile, "Published", "Actor ready and HTTPRoute accepted", &result)
 }

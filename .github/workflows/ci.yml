@@ -12,6 +12,20 @@ jobs:
   test:
     name: Go checks
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
+        env:
+          POSTGRES_USER: jobs
+          POSTGRES_PASSWORD: ci-jobs
+          POSTGRES_DB: jobs
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U jobs -d jobs"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
@@ -26,6 +40,8 @@ jobs:
           fi
       - run: go vet ./...
       - run: go test -race ./...
+        env:
+          WORKER_JOB_TEST_DSN: postgres://jobs:ci-jobs@127.0.0.1:${{ job.services.postgres.ports[5432] }}/jobs?sslmode=disable
       - name: Render the direct ATE example
         run: go run ./cmd/workerctl render -f examples/echo/ate-worker.yaml -profile examples/echo/ate-profile.yaml > "$RUNNER_TEMP/echo-ate-plan.txt"
       - name: Check the controller image

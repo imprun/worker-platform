@@ -38,6 +38,8 @@ spec:
                 profile:
                   type: string
                   pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+                jobEnabled:
+                  type: boolean
                 image:
                   type: string
                   maxLength: 512

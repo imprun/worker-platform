@@ -30,14 +30,15 @@ type ATEDeployment struct {
 }
 
 type ATEDeploymentResult struct {
-	Revision  string `json:"revision"`
-	Atespace  string `json:"atespace"`
-	Actor     string `json:"actor"`
-	ActorUID  string `json:"actorUID"`
-	Worker    string `json:"worker"`
-	WorkerPod string `json:"workerPod"`
-	Route     string `json:"route"`
-	Status    string `json:"status"`
+	Revision  string       `json:"revision"`
+	Atespace  string       `json:"atespace"`
+	Actor     string       `json:"actor"`
+	ActorUID  string       `json:"actorUID"`
+	Worker    string       `json:"worker"`
+	WorkerPod string       `json:"workerPod"`
+	Route     string       `json:"route"`
+	Status    string       `json:"status"`
+	Job       *JobRevision `json:"-"`
 }
 
 func (d ATEDeployment) Deploy(ctx context.Context, w Worker, p WorkerProfile) (ATEDeploymentResult, error) {
@@ -90,11 +91,15 @@ func (d ATEDeployment) Deploy(ctx context.Context, w Worker, p WorkerProfile) (A
 	if err := d.awaitRoute(ctx, plan.Route, w.Spec.Trigger.Gateway); err != nil {
 		return ATEDeploymentResult{}, err
 	}
-	return ATEDeploymentResult{
+	result := ATEDeploymentResult{
 		Revision: plan.Revision, Atespace: ref.GetAtespace(), Actor: ref.GetName(), ActorUID: uid,
 		Worker: assignment.GetWorker().GetName(), WorkerPod: assignment.GetWorkerPod(),
 		Route: w.Metadata.Namespace + "/" + w.Metadata.Name, Status: "published",
-	}, nil
+	}
+	if w.Spec.JobEnabled {
+		result.Job, err = newJobRevision(plan, templateUID, p)
+	}
+	return result, err
 }
 
 func (d ATEDeployment) plan(w Worker, p WorkerProfile) (ATEPlan, error) {

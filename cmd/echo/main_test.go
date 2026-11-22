@@ -18,6 +18,8 @@ func TestEchoContract(t *testing.T) {
 		{"GET", "/invoke", "", 405},
 		{"POST", "/invoke", `{"message":null}`, 400},
 		{"POST", "/invoke", `{"message":"hello"}{}`, 400},
+		{"POST", "/attempt", `{"runId":"test-run","attempt":1,"input":{"message":"hello"}}`, 200},
+		{"POST", "/attempt", `{"runId":"test-run","attempt":0,"input":{"message":"hello"}}`, 400},
 	} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))

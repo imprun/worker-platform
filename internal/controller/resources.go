@@ -12,7 +12,25 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 )
+
+// PublishedJob reads the same readiness-gated revision used to publish HTTP traffic.
+func PublishedJob(ctx context.Context, client dynamic.Interface, namespace, name string) (workerUID, revision string, err error) {
+	obj, err := client.Resource(workersGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) || err == nil && obj.GetDeletionTimestamp() != nil {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	enabled, _, err := unstructured.NestedBool(obj.Object, "spec", "jobEnabled")
+	if err != nil || !enabled {
+		return "", "", err
+	}
+	revision, _, err = unstructured.NestedString(obj.Object, "status", "active", "revision")
+	return string(obj.GetUID()), revision, err
+}
 
 type profileRevision struct {
 	Name       string    `json:"name"`

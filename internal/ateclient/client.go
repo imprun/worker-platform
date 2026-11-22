@@ -1,12 +1,14 @@
 package ateclient
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -72,7 +74,34 @@ func (o Options) Open() (*Client, error) {
 }
 
 func (c *Client) Ready(ctx context.Context, actor *ate.ObjectRef) (bool, error) {
-	return c.probe.ready(ctx, actor)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	response, err := c.probe.request(ctx, http.MethodGet, "/readyz", actor, nil)
+	if err != nil {
+		return false, err
+	}
+	defer response.Body.Close()
+	switch response.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return false, nil
+	default:
+		return false, fmt.Errorf("ATE Router readiness returned HTTP %d", response.StatusCode)
+	}
+}
+
+func (c *Client) InvokeAttempt(ctx context.Context, actor *ate.ObjectRef, body []byte, limit int64) (int, []byte, error) {
+	response, err := c.probe.request(ctx, http.MethodPost, "/attempt", actor, body)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return response.StatusCode, nil, nil
+	}
+	result, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	return response.StatusCode, result, err
 }
 
 func (c *Client) Close() error {
@@ -110,7 +139,7 @@ func loadTrust(path string) (*x509.CertPool, error) {
 
 type routerProbe struct {
 	client   *http.Client
-	endpoint string
+	endpoint url.URL
 }
 
 func (o Options) newRouterProbe() (routerProbe, error) {
@@ -130,11 +159,9 @@ func (o Options) newRouterProbe() (routerProbe, error) {
 	if err != nil {
 		return routerProbe{}, fmt.Errorf("load ATE Router client identity: %w", err)
 	}
-	u.Path = "/readyz"
 	return routerProbe{
-		endpoint: u.String(),
+		endpoint: *u,
 		client: &http.Client{
-			Timeout:       5 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 			Transport: &http.Transport{
 				ForceAttemptHTTP2: true,
@@ -147,23 +174,17 @@ func (o Options) newRouterProbe() (routerProbe, error) {
 	}, nil
 }
 
-func (p routerProbe) ready(ctx context.Context, actor *ate.ObjectRef) (bool, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, p.endpoint, nil)
+func (p routerProbe) request(ctx context.Context, method, path string, actor *ate.ObjectRef, body []byte) (*http.Response, error) {
+	endpoint := p.endpoint
+	endpoint.Path = path
+	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), bytes.NewReader(body))
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	request.Header.Set("ate-target-actor", actor.GetAtespace()+"/"+actor.GetName())
-	response, err := p.client.Do(request)
-	if err != nil {
-		return false, err
+	if method == http.MethodPost {
+		request.Header.Set("Content-Type", "application/json")
+		request.GetBody = nil
 	}
-	defer response.Body.Close()
-	switch response.StatusCode {
-	case http.StatusOK:
-		return true, nil
-	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-		return false, nil
-	default:
-		return false, fmt.Errorf("ATE Router readiness returned HTTP %d", response.StatusCode)
-	}
+	return p.client.Do(request)
 }

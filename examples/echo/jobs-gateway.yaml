@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-jobs
+  namespace: wp-echo-example
+spec:
+  selector:
+    app.kubernetes.io/name: worker-controller
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8084
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: echo-jobs
+  namespace: wp-echo-example
+spec:
+  parentRefs:
+    - name: echo
+      sectionName: http
+  hostnames: [echo.example.test]
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1
+      backendRefs:
+        - name: worker-jobs
+          port: 80
