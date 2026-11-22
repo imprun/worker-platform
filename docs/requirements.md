@@ -4,13 +4,13 @@
 
 첫 운영 릴리스는 워커 앱 하나에 제출하는 **단일 Job**을 지원한다. 장애 재시도, 사용자 개입(HITL)을 통한 재인증, 취소와 결과 조회는 같은 실행의 수명주기에 속한다. 여러 Job을 연결하는 워크플로와 A2A 연동은 후속 범위다. `windforce-core`는 Windmill을 참고해 ATE 없이 만든 워커 POC이며, 그 경험을 실행 기록과 풀별 운용 요구사항에 반영했다. [Windmill의 Job 모델](https://www.windmill.dev/docs/core_concepts/jobs)
 
-공개 알파의 동기 배포와 첫 운영 릴리스의 구성을 [아키텍처](architecture.md)에서 확인할 수 있다. 아래는 첫 운영 릴리스의 인수 기준이다. [Job 상세 설계](job-execution-design.md) · [검토 근거와 출시 기준](design-review.md)
+현재의 ATE 동기 배포와 첫 운영 릴리스의 구성을 [아키텍처](architecture.md)에서 확인할 수 있다. 아래는 첫 운영 릴리스의 인수 기준이다. [Job 상세 설계](job-execution-design.md) · [검토 근거와 출시 기준](design-review.md)
 
 ## 기능과 인수 기준
 
 | ID | 요구사항 | 인수 기준 |
 | --- | --- | --- |
-| R1 | **ATE 직접 설치와 Gateway 호출.** 운영자가 문서화된 Kubernetes·GatewayClass·ATE 조합으로 별도 ARM64 gVisor 풀에 설치한다. | AX 없이 Echo Actor가 준비되고 Gateway에서 Router로 mTLS를 연결해 응답한다. CRD 검증과 실제 Gateway–Router mTLS 왕복을 각각 확인한다. 응답이 구분되는 두 시험 Actor로 대상 헤더 덮어쓰기를 입증한다. 허용한 egress만 성공한다. |
+| R1 | **ATE 직접 설치와 Gateway 호출.** 운영자가 문서화된 Kubernetes·GatewayClass·ATE 조합으로 별도 ARM64 gVisor 풀에 설치한다. | ATE Control API로 Echo Actor를 준비하고 Gateway에서 Router로 mTLS를 연결해 응답을 받는다. CRD 검증과 실제 Gateway–Router mTLS 왕복을 각각 확인한다. 응답이 구분되는 두 시험 Actor로 대상 헤더 덮어쓰기를 입증한다. 허용한 egress만 성공한다. |
 | R2 | **정책이 포함된 배포와 롤백.** 워커는 OCI digest와 승인된 프로필을 선언하고 같은 URL을 유지한다. | 같은 명세를 반복 적용하면 같은 리비전이 사용된다. v2 Ready 전에는 v1, 전환 뒤에는 v2가 응답한다. 준비 실패 중에는 v1 응답이 지속된다. 보존된 v1으로 롤백하면 기존 서비스 Actor와 URL을 사용한다. |
 | R3 | **Job 접수와 결과 조회.** 접수한 리비전·입력을 영속화한 뒤 `202`와 실행 ID를 반환한다. | 접수 서비스 재시작 뒤에도 ID로 조회된다. 같은 범위의 멱등 키·입력을 동시에 보내면 같은 ID, 같은 키로 다른 입력을 보내면 `409`다. 전체 접수 한도가 찬 경우에도 기존 키의 재요청은 같은 ID를 받는다. |
 | R4 | **실행 장애 복구와 정리.** 시도는 접수 당시 리비전에서 실행한다. 결과와 점유 슬롯은 실행 ID로 추적 가능하다. | v1으로 접수한 80초 Job 도중 v2를 게시하고 실제 배정된 테스트 Worker를 종료하면 다른 Worker에서 v1으로 복구한다. 원래 ID의 결과는 한 건이며 Run의 점유 슬롯은 0개다. 늦은 완료 보고는 결과를 바꾸지 못한다. 생성·시작·완료 응답 유실과 컨트롤러 재시작 후에도 중복 실행권과 슬롯 누수가 없다. |

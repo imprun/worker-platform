@@ -55,8 +55,8 @@ func ReadWorkerProfile(r io.Reader) (WorkerProfile, error) {
 }
 
 func (p WorkerProfile) Validate() error {
-	if p.APIVersion != ATEWorkerVersion || p.Kind != "WorkerProfile" {
-		return fmt.Errorf("expected %s WorkerProfile", ATEWorkerVersion)
+	if p.APIVersion != WorkerVersion || p.Kind != "WorkerProfile" {
+		return fmt.Errorf("expected %s WorkerProfile", WorkerVersion)
 	}
 	s := p.Spec
 	if err := checkLabels(p.Metadata.Name, p.Metadata.Namespace, s.Atespace, s.WorkerPool.Name, s.WorkerPool.Namespace, s.PoolID); err != nil {
@@ -135,9 +135,6 @@ type ATEPlan struct {
 func BuildATEPlan(w Worker, p WorkerProfile) (ATEPlan, error) {
 	if err := w.Validate(); err != nil {
 		return ATEPlan{}, err
-	}
-	if w.APIVersion != ATEWorkerVersion {
-		return ATEPlan{}, fmt.Errorf("direct deployment requires %s", ATEWorkerVersion)
 	}
 	if err := p.Validate(); err != nil {
 		return ATEPlan{}, err

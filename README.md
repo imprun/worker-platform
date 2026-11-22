@@ -48,4 +48,4 @@ Echo는 `{"message":"hello"}`를 반환합니다. `render`는 생성할 Kubernet
 ECHO_REPOSITORY=registry.example.test/workers/echo sh examples/echo/run.sh
 ```
 
-초기 공개 알파의 배포 절차와 이미지 레시피는 당시 릴리스에서 볼 수 있습니다. [v0.1.0-alpha.1](https://github.com/imprun/worker-platform/tree/v0.1.0-alpha.1) · [기여와 테스트](CONTRIBUTING.md) · [보안 문의](SECURITY.md)
+배포에는 `workerplatform.imprun.dev/v1alpha2`의 `HTTPWorker`와 `WorkerProfile`을 사용합니다. [명세 전환](docs/ate-deployment.md#명세-전환) · [기여와 테스트](CONTRIBUTING.md) · [보안 문의](SECURITY.md)

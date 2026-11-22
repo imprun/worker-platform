@@ -26,8 +26,6 @@ jobs:
           fi
       - run: go vet ./...
       - run: go test -race ./...
-      - name: Render the example HTTPRoute
-        run: go run ./cmd/workerctl render -f examples/echo/worker.yaml -output route > "$RUNNER_TEMP/echo-route.json"
       - name: Render the direct ATE example
         run: go run ./cmd/workerctl render -f examples/echo/ate-worker.yaml -profile examples/echo/ate-profile.yaml > "$RUNNER_TEMP/echo-ate-plan.txt"
       - name: Check the Echo image and example script

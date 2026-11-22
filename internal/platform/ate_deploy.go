@@ -13,7 +13,8 @@ import (
 )
 
 type ATECluster interface {
-	RouteStore
+	Read(context.Context, ObjectName) (*Route, error)
+	Publish(context.Context, Route, *Route) error
 	CheckWorkerPool(context.Context, WorkerProfile) error
 	GatewayProgrammed(context.Context, GatewayRef) (bool, error)
 }

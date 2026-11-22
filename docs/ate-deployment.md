@@ -14,6 +14,10 @@
 
 풀의 `metadata.labels`에 고유한 `workerplatform.imprun.dev/pool-id`를 설정한다. 풀을 다시 만들 때는 새 값을 사용한다. `HTTPWorker`와 `WorkerProfile`의 네임스페이스는 같아야 한다. Gateway는 Router가 허용한 클라이언트 인증서를 제시하며 `BackendTLSPolicy`의 CA와 DNS 이름으로 Router를 확인한다. [ATE 풀 선택](https://ate.dev/docs/reference/api-guide/) · [Gateway API TLS](https://gateway-api.sigs.k8s.io/guides/user-guides/tls/)
 
+## 명세 전환
+
+이전 `HTTPWorker` 파일을 옮길 때는 `apiVersion`을 `workerplatform.imprun.dev/v1alpha2`로 지정한다. 이미지와 트리거는 `HTTPWorker`에 두고, Atespace와 CPU·메모리·egress는 같은 네임스페이스의 `WorkerProfile`에 작성한다. 워커의 `spec.profile`에 프로필 이름을 넣고 `-f`와 `-profile`을 함께 전달한다. 기존 라우트가 있는 환경에서는 별도 개발 호스트에서 검증한다. 직접 배포 CLI는 자신과 소유권이 일치하는 HTTPRoute만 갱신한다. [워커 명세](../examples/echo/ate-worker.yaml) · [프로필 명세](../examples/echo/ate-profile.yaml)
+
 ## 배포와 호출
 
 `workerctl render`로 유효 설정을 미리 확인한다. `-output`은 `template`, `actor`, `policy`, `route` 또는 `all`을 받는다. ATE 리소스는 Control API 요청 형식이며, HTTPRoute는 Kubernetes 리소스다.

@@ -1,22 +1,11 @@
 package platform
 
-import (
-	"crypto/sha256"
-	"encoding/json"
-	"fmt"
-
-	ax "github.com/google/ax/pkg/apis/v1alpha1"
-)
+import "encoding/json"
 
 const (
 	OwnerAnnotation = "workerplatform.imprun.dev/owner"
 	GatewayAPI      = "gateway.networking.k8s.io"
 )
-
-type Plan struct {
-	Task  *ax.Task
-	Route Route
-}
 
 type Route struct {
 	APIVersion string          `json:"apiVersion"`
@@ -31,39 +20,6 @@ type RouteMetadata struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 	UID         string            `json:"uid,omitempty"`
 	Generation  int64             `json:"generation,omitempty"`
-}
-
-func BuildPlan(w Worker) (Plan, error) {
-	if err := w.Validate(); err != nil {
-		return Plan{}, err
-	}
-	if w.APIVersion != WorkerVersion {
-		return Plan{}, fmt.Errorf("AX deployment requires %s", WorkerVersion)
-	}
-	owner := w.Metadata.Namespace + "/" + w.Metadata.Name
-	taskSpec := &ax.TaskSpec{
-		Image:     w.Spec.Image,
-		Resources: &ax.ResourcesSpec{Limits: &ax.ResourceList{Cpu: w.Spec.CPU, Memory: w.Spec.Memory}},
-	}
-	if w.Spec.EgressGateway != "" {
-		taskSpec.Gateway = &ax.GatewayRef{Name: w.Spec.EgressGateway}
-	}
-	identity, err := json.Marshal(struct {
-		Owner string
-		Space string
-		Spec  *ax.TaskSpec
-	}{owner, w.Spec.Atespace, taskSpec})
-	if err != nil {
-		return Plan{}, err
-	}
-	hash := sha256.Sum256(identity)
-	name := fmt.Sprintf("w-%s-%x", w.Metadata.Name, hash[:8])
-	task := &ax.Task{
-		ApiVersion: "ax.io/v1alpha1", Kind: "Task", Spec: taskSpec,
-		Metadata: &ax.ObjectMeta{Name: name, Atespace: w.Spec.Atespace},
-	}
-	route, err := buildRoute(w, owner, w.Spec.Atespace+"/"+name)
-	return Plan{Task: task, Route: route}, err
 }
 
 func buildRoute(w Worker, owner, target string) (Route, error) {

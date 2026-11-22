@@ -10,10 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	WorkerVersion    = "workerplatform.imprun.dev/v1alpha1"
-	ATEWorkerVersion = "workerplatform.imprun.dev/v1alpha2"
-)
+const WorkerVersion = "workerplatform.imprun.dev/v1alpha2"
 
 type Worker struct {
 	APIVersion string     `yaml:"apiVersion"`
@@ -28,13 +25,9 @@ type ObjectName struct {
 }
 
 type WorkerSpec struct {
-	Profile       string      `yaml:"profile"`
-	Atespace      string      `yaml:"atespace"`
-	Image         string      `yaml:"image"`
-	CPU           string      `yaml:"cpu"`
-	Memory        string      `yaml:"memory"`
-	EgressGateway string      `yaml:"egressGateway"`
-	Trigger       HTTPTrigger `yaml:"trigger"`
+	Profile string      `yaml:"profile"`
+	Image   string      `yaml:"image"`
+	Trigger HTTPTrigger `yaml:"trigger"`
 }
 
 type HTTPTrigger struct {
@@ -88,8 +81,8 @@ func readManifest(r io.Reader, kind string, dst any) error {
 }
 
 func (w Worker) Validate() error {
-	if w.Kind != "HTTPWorker" || (w.APIVersion != WorkerVersion && w.APIVersion != ATEWorkerVersion) {
-		return fmt.Errorf("expected HTTPWorker with apiVersion %s or %s", WorkerVersion, ATEWorkerVersion)
+	if w.Kind != "HTTPWorker" || w.APIVersion != WorkerVersion {
+		return fmt.Errorf("expected %s HTTPWorker", WorkerVersion)
 	}
 	if err := checkLabels(w.Metadata.Name, w.Metadata.Namespace); err != nil {
 		return fmt.Errorf("worker identity: %w", err)
@@ -100,30 +93,11 @@ func (w Worker) Validate() error {
 	if !imagePattern.MatchString(w.Spec.Image) || len(w.Spec.Image) > 512 {
 		return errors.New("spec.image must be a repository reference pinned to a SHA-256 digest")
 	}
-	switch w.APIVersion {
-	case WorkerVersion:
-		if w.Spec.Profile != "" {
-			return errors.New("spec.profile requires a v1alpha2 HTTPWorker")
-		}
-		if err := checkLabels(w.Spec.Atespace); err != nil {
-			return fmt.Errorf("worker atespace: %w", err)
-		}
-		if !cpuPattern.MatchString(w.Spec.CPU) || !memoryPattern.MatchString(w.Spec.Memory) {
-			return errors.New("spec.cpu must be positive cores or millicores and spec.memory must be positive Mi or Gi")
-		}
-		if w.Spec.EgressGateway != "" && !labelPattern.MatchString(w.Spec.EgressGateway) {
-			return errors.New("spec.egressGateway must be a DNS label")
-		}
-	case ATEWorkerVersion:
-		if err := checkLabels(w.Spec.Profile); err != nil {
-			return fmt.Errorf("worker profile: %w", err)
-		}
-		if w.Spec.Atespace != "" || w.Spec.CPU != "" || w.Spec.Memory != "" || w.Spec.EgressGateway != "" {
-			return errors.New("v1alpha2 HTTPWorker takes its execution settings from WorkerProfile")
-		}
-		if w.Spec.Trigger.Path == "/attempt" {
-			return errors.New("/attempt is reserved for internal execution")
-		}
+	if err := checkLabels(w.Spec.Profile); err != nil {
+		return fmt.Errorf("worker profile: %w", err)
+	}
+	if w.Spec.Trigger.Path == "/attempt" {
+		return errors.New("/attempt is reserved for internal execution")
 	}
 	t := w.Spec.Trigger
 	if len(t.Hostname) > 253 || !strings.Contains(t.Hostname, ".") || checkLabels(strings.Split(t.Hostname, ".")...) != nil {

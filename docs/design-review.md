@@ -1,6 +1,6 @@
 # 설계 검토와 검증 근거
 
-검토 기준은 Worker Platform의 공개 알파 코드 `9899024`, ATE `v1.0.0`, 그리고 아래에 고정한 kagent·Testkube 소스다. 운영 릴리스는 **ATE 직접 배포**, **Kubernetes Gateway API**, **하나의 영속 Run으로 관리하는 단일 Job**으로 진행한다. [아키텍처](architecture.md) · [요구사항](requirements.md) · [상세 설계](job-execution-design.md)
+검토 기준은 파일 기반 ATE 직접 배포 코드, ATE `v1.0.0`, 그리고 아래에 고정한 kagent·Testkube 소스다. 운영 릴리스는 **ATE 직접 배포**, **Kubernetes Gateway API**, **하나의 영속 Run으로 관리하는 단일 Job**으로 진행한다. [아키텍처](architecture.md) · [요구사항](requirements.md) · [상세 설계](job-execution-design.md)
 
 ## 발견한 문제와 설계 결정
 
@@ -17,8 +17,7 @@
 
 | 확인 대상 | 관찰 결과 |
 | --- | --- |
-| 공개 알파 Go 코드 | `workerctl`이 AX Task와 라우트를 만들고, AX Ready 확인 뒤 소유한 라우트를 게시한다. Go 테스트와 CLI 출력에서 Echo 계약, 대상 헤더 덮어쓰기 설정, 모의 AX 준비·롤백, 라우트 UID·세대 조건을 확인했다. [클라이언트 테스트](../internal/platform/platform_test.go) · [Echo 테스트](../cmd/echo/main_test.go) |
-| 공개 알파의 클러스터 검증 | 초기 검증에서 ARM64 바이너리 빌드와 Gateway API 리소스의 서버 dry-run을 수행했다. 실제 Gateway–ATE mTLS 연결과 Actor 헤더 강제는 R1에서 확인할 항목이다. [알파 배포 가이드](cluster-setup.md) |
+| 배포 코드 | v1alpha2 명세 검증, Actor 대상 헤더 설정, 후보 준비 실패 시 기존 라우트 보존, 롤백의 Actor 재사용, 라우트 UID·세대·소유권 사전조건을 Go 테스트에서 확인했다. [배포 테스트](../internal/platform/ate_deploy_test.go) · [라우트와 명세 테스트](../internal/platform/platform_test.go) |
 | ATE 직접 배포의 첫 구현 | 파일 기반 v1alpha2 명세로 전용 ARM64 gVisor 풀에 Echo를 배포했다. Gateway 경유 HTTP 200, Router의 클라이언트 인증서 검증과 같은 리비전의 Actor 재사용을 확인했다. [배포 실증](ate-deployment.md#개발계-검증-기록) |
 | 첫 운영 릴리스 | 지속 ATE 직접 컨트롤러, Job API와 PostgreSQL, Run/Attempt 복구, 풀 한도, 계정 세션, 대시보드는 설계 단계다. 전체 흐름의 동작은 아래 인수 시험으로 입증한다. |
 
@@ -28,7 +27,7 @@
 
 | 요구사항 | 시험과 수집할 증거 |
 | --- | --- |
-| R1 설치·호출 | Echo를 AX 없이 배포한다. 실제 Router TLS 신원과 Gateway 응답을 확인한다. 위조 대상 헤더, 허용·거부 목적지, 동기 경로에서 사설 `/attempt` 접근 거부를 각각 시험한다. |
+| R1 설치·호출 | Echo를 ATE Control API로 직접 배포한다. 실제 Router TLS 신원과 Gateway 응답을 확인한다. 위조 대상 헤더, 허용·거부 목적지, 동기 경로에서 사설 `/attempt` 접근 거부를 각각 시험한다. |
 | R2 배포·롤백 | 같은 URL을 반복 호출하며 v1 → v2 → v1을 추적한다. 준비되지 않는 v2, 같은 경로를 요청한 다른 워커, Route 갱신 직후 컨트롤러 종료를 시험한다. Gateway 조건의 세대, 전환 시점, 기존 Actor UID와 최종 리비전을 남긴다. |
 | R3 멱등·조회 | 접수 응답 직후 API를 재시작한다. 동시 중복, 다른 입력의 `409`, 전체 접수 한도에서 기존 키 조회, 새 리비전에서 스키마가 바뀐 뒤 기존 키 재요청과 결과 조회를 검사한다. |
 | R4 Worker 장애·회수 | 80초 v1 실행의 실제 Worker를 확인한 뒤 v2를 게시하고 해당 테스트 Worker를 종료한다. 다른 Worker가 시도한 v1의 결과를 원래 ID에서 한 건 조회하고, 해당 Run의 슬롯·남은 Actor가 0개인지 확인한다. 결과 확정 후 이전 시도의 늦은 보고를 보내도 같아야 한다. |
@@ -48,7 +47,7 @@
 
 ### kagent
 
-kagent `v1.0.1`의 커밋 `558e3d761d8ed2b0d23bfef1867a9d1915210121`에서 컨트롤러·Go 러너·SQL·React UI와 관련 테스트를 읽었다. kagent Go 모듈은 ATE 모듈을 `github.com/kagent-dev/substrate`로 치환한다. Worker Platform의 알파는 `go.ate.dev/substrate v1.0.0`을 AX를 통해 간접 사용한다. [kagent 릴리스](https://github.com/kagent-dev/kagent/releases/tag/v1.0.1) · [kagent 의존성](https://github.com/kagent-dev/kagent/blob/558e3d761d8ed2b0d23bfef1867a9d1915210121/go/go.mod#L510-L515) · [이 저장소 의존성](../go.mod)
+kagent `v1.0.1`의 커밋 `558e3d761d8ed2b0d23bfef1867a9d1915210121`에서 컨트롤러·Go 러너·SQL·React UI와 관련 테스트를 읽었다. kagent Go 모듈은 ATE 모듈을 `github.com/kagent-dev/substrate`로 치환한다. Worker Platform은 `go.ate.dev/substrate v1.0.0`의 Control API 클라이언트를 직접 사용한다. [kagent 릴리스](https://github.com/kagent-dev/kagent/releases/tag/v1.0.1) · [kagent 의존성](https://github.com/kagent-dev/kagent/blob/558e3d761d8ed2b0d23bfef1867a9d1915210121/go/go.mod#L510-L515) · [이 저장소 의존성](../go.mod)
 
 | 코드에서 확인한 동작 | 적용 |
 | --- | --- |

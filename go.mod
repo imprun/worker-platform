@@ -3,7 +3,6 @@ module github.com/imprun/worker-platform
 go 1.27.1
 
 require (
-	github.com/google/ax v0.0.0-20261114042315-eac831339211
 	go.ate.dev/substrate v1.0.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
