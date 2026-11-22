@@ -2,14 +2,17 @@
 
 `workerctl`은 `HTTPWorker` v1alpha2와 운영자가 준비한 `WorkerProfile`로 ATE Actor를 배포한다. Kubernetes Gateway의 동기 `POST` 호출은 ATE Router를 거쳐 해당 Actor로 전달된다. 실행 설정이 같은 명세는 리비전과 Actor를 재사용한다. [아키텍처](architecture.md)
 
-## 개발계 준비
+## Echo 예제
 
-1. 운영자가 ATE에 전용 Atespace와 배포 주체의 `editor` 권한을 만든다. ATE Control TLS 신뢰 번들과 대상 audience의 토큰을 준비한다. Kubernetes의 배포 주체에는 지정한 WorkerPool과 Gateway의 `get`, 앱 네임스페이스 HTTPRoute의 `get`, `create`, `patch`를 부여한다. [ATE 인증](https://ate.dev/docs/guides/authentication/) · [ATE 접근 정책](https://ate.dev/docs/guides/authorization/)
-2. [WorkerPool 예제](../examples/cluster/ate-workerpool.yaml)를 개발계의 노드와 gVisor 설정에 맞춰 생성한다. 풀의 `metadata.labels`에 고유한 `workerplatform.imprun.dev/pool-id`를 설정한다. 풀을 다시 만들 때는 새 값을 사용한다. 공유 ATE에서는 선택자 없는 기존 템플릿도 배치될 수 있으므로, 시험 풀을 생성하기 전에 기존 템플릿이 새 풀에 들어오지 않을 자원 경계를 확인한다. [ATE 풀 선택](https://ate.dev/docs/reference/api-guide/)
-3. [Gateway 예제](../examples/cluster/gateway.yaml)의 GatewayClass, 리스너, Router Service와 TLS 참조를 개발계에 맞춘다. Gateway API v1.5 이상의 Standard CRD와 upstream mTLS를 지원하는 구현체를 사용한다. Gateway의 `backend.clientCertificateRef`에는 Router가 허용한 클라이언트 신원을, `BackendTLSPolicy`에는 Router 서버의 CA와 DNS 이름을 설정한다. Router Service가 다른 네임스페이스에 있으면 해당 이름을 대상으로 한 `ReferenceGrant`를 둔다. [Gateway API TLS](https://gateway-api.sigs.k8s.io/guides/user-guides/tls/)
-4. [Echo 이미지](../Dockerfile.echo)를 `linux/arm64`로 빌드하고 레지스트리에 게시한다. [워커 명세](../examples/echo/ate-worker.yaml)에 digest 참조와 Gateway를 지정한다. [프로필 명세](../examples/echo/ate-profile.yaml)의 Atespace, WorkerPool 참조, 풀 ID를 개발 자원과 맞춘다. 두 명세의 네임스페이스는 같아야 한다.
+전용 Atespace, ARM64 gVisor 풀, mTLS Gateway를 구성하고 Echo를 빌드·배포·호출하는 명령이 예제 디렉터리에 있다. [Echo 전체 예제](../examples/echo/README.md)
+
+## 실행 설정
+
+운영자가 Atespace와 배포 주체의 `editor` 권한을 준비한다. Kubernetes 배포 주체에는 지정한 WorkerPool과 Gateway의 `get`, 앱 네임스페이스 HTTPRoute의 `get`, `create`, `patch`를 부여한다. [ATE 인증](https://ate.dev/docs/guides/authentication/) · [ATE 접근 정책](https://ate.dev/docs/guides/authorization/)
 
 프로필은 CPU·메모리, 풀, gVisor 아키텍처와 egress를 정한다. `egress`를 생략하면 목적지를 허용하지 않는 빈 정책을 적용한다. 목적지가 필요하면 `protocol`에 `http` 또는 `tlsPassthrough`, `hostname`에 정확한 DNS 이름, `port`에 목적지 포트를 설정한다. 이미지의 진입점은 포트 80에서 `GET /readyz`와 선언한 `POST`를 제공한다.
+
+풀의 `metadata.labels`에 고유한 `workerplatform.imprun.dev/pool-id`를 설정한다. 풀을 다시 만들 때는 새 값을 사용한다. `HTTPWorker`와 `WorkerProfile`의 네임스페이스는 같아야 한다. Gateway는 Router가 허용한 클라이언트 인증서를 제시하며 `BackendTLSPolicy`의 CA와 DNS 이름으로 Router를 확인한다. [ATE 풀 선택](https://ate.dev/docs/reference/api-guide/) · [Gateway API TLS](https://gateway-api.sigs.k8s.io/guides/user-guides/tls/)
 
 ## 배포와 호출
 
@@ -26,7 +29,7 @@ go run ./cmd/workerctl render \
 ```sh
 kubectl --context "$KUBE_CONTEXT" -n ate-system port-forward svc/api 17443:443
 # 다른 터미널에서 실행
-kubectl --context "$KUBE_CONTEXT" -n ate-system port-forward svc/atenet-router 18443:443
+kubectl --context "$KUBE_CONTEXT" -n ate-system port-forward svc/wp-echo-example-router 18443:443
 ```
 
 ```sh
@@ -44,7 +47,7 @@ CLI는 풀·아키텍처를 검증하고 ActorTemplate, Actor와 egress 정책�
 개발 Gateway의 ClusterIP Service를 로컬로 포트포워드한 뒤 앱 URL을 호출한다.
 
 ```sh
-kubectl --context "$KUBE_CONTEXT" -n workers port-forward "svc/$GATEWAY_SERVICE" 18080:80
+kubectl --context "$KUBE_CONTEXT" -n wp-echo-example port-forward svc/echo 18080:80
 # 다른 터미널에서 실행
 curl -fsS -H 'Host: echo.example.test' -H 'Content-Type: application/json' \
   -d '{"message":"ate-direct-arm64-mtls"}' http://127.0.0.1:18080/invoke

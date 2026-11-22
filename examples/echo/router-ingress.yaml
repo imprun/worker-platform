@@ -1,0 +1,22 @@
+# Router Pod가 기존 ingress 정책으로 격리된 개발계에 적용한다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: wp-echo-example-router
+  namespace: ate-system
+spec:
+  podSelector:
+    matchLabels:
+      app: atenet-router
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: wp-echo-example
+          podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: echo
+      ports:
+        - protocol: TCP
+          port: https

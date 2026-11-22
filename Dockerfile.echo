@@ -1,9 +1,12 @@
-FROM golang:1.27.4 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.4 AS build
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
+COPY go.mod go.sum ./
 COPY cmd/echo ./cmd/echo
-RUN CGO_ENABLED=0 go build -trimpath -o /out/ax-task-runner ./cmd/echo/main.go
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/echo-worker ./cmd/echo
 
 FROM scratch
-COPY --from=build /out/ax-task-runner /usr/local/bin/ax-task-runner
+COPY --from=build /out/echo-worker /usr/local/bin/echo-worker
 EXPOSE 80
-ENTRYPOINT ["/usr/local/bin/ax-task-runner"]
+ENTRYPOINT ["/usr/local/bin/echo-worker"]

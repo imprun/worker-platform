@@ -113,7 +113,7 @@ func TestATEDirectDeploymentGatesRouteAndReusesRevisions(t *testing.T) {
 		t.Fatalf("reusing revisions performed unexpected mutations: %v; publications %d", control.mutations, cluster.publications)
 	}
 
-	cluster.route.Metadata.Annotations[OwnerAnnotation] = "workers/echo"
+	cluster.route.Metadata.Annotations[OwnerAnnotation] = w.Metadata.Namespace + "/" + w.Metadata.Name
 	if _, err := d.Deploy(t.Context(), w, p); err == nil || len(control.mutations) != 8 {
 		t.Fatalf("ATE deployment accepted a route owned by another deployer: %v", err)
 	}

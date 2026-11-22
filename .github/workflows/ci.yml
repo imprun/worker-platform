@@ -30,3 +30,14 @@ jobs:
         run: go run ./cmd/workerctl render -f examples/echo/worker.yaml -output route > "$RUNNER_TEMP/echo-route.json"
       - name: Render the direct ATE example
         run: go run ./cmd/workerctl render -f examples/echo/ate-worker.yaml -profile examples/echo/ate-profile.yaml > "$RUNNER_TEMP/echo-ate-plan.txt"
+      - name: Check the Echo image and example script
+        run: |
+          sh -n examples/echo/run.sh
+          docker buildx build --load --file Dockerfile.echo --tag worker-platform-echo:ci .
+          container=$(docker run --detach --rm --publish 127.0.0.1::80 worker-platform-echo:ci)
+          trap 'docker stop "$container" >/dev/null' EXIT
+          address=$(docker port "$container" 80/tcp)
+          curl -fsS --retry 5 --retry-connrefused --max-time 5 "http://$address/readyz"
+          response=$(curl -fsS --max-time 5 -H 'Content-Type: application/json' \
+            --data '{"message":"echo-example"}' "http://$address/invoke")
+          test "$response" = '{"message":"echo-example"}'

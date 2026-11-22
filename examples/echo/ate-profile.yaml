@@ -2,9 +2,9 @@ apiVersion: workerplatform.imprun.dev/v1alpha2
 kind: WorkerProfile
 metadata:
   name: echo-arm64
-  namespace: workers
+  namespace: wp-echo-example
 spec:
-  atespace: workers-dev
+  atespace: wp-echo-example
   workerPool:
     name: echo-arm64-dev
     namespace: ate-system

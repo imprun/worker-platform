@@ -17,7 +17,7 @@
 
 ## 배포와 연결 확인
 
-1. Gateway의 `Accepted`와 `Programmed`를 확인한다. 준비된 Atespace와 WorkerPool에 [Echo 예제](../README.md#deploy-the-example)를 배포한다.
+1. Gateway의 `Accepted`와 `Programmed`를 확인한다. 준비된 Atespace와 WorkerPool에 태그에 있는 이미지 레시피와 Echo 배포 명세를 사용한다. [공개 알파 Echo 예제](https://github.com/imprun/worker-platform/blob/v0.1.0-alpha.1/README.md#deploy-the-example)
 2. HTTPRoute의 지정한 Gateway·리스너에 대해 현재 `metadata.generation`과 같은 `observedGeneration`의 `Accepted=True`, `ResolvedRefs=True`를 확인한다. [Gateway API 상태와 세대](https://gateway-api.sigs.k8s.io/docs/concepts/troubleshooting/)
 3. `POST /invoke`로 Echo JSON을 확인한다. 다른 시험 Actor를 가리키는 `ate-target-actor`를 요청에 포함해 다시 호출하고 같은 Echo가 처리하는지 확인한다.
 4. 라우트가 준비됐는데 요청에 실패하면 Gateway가 Router에 올바른 클라이언트 인증서를 제시하는지, Router CA와 서버 이름을 확인하는지, 양쪽에서 허용된 연결 신원을 쓰는지 점검한다.

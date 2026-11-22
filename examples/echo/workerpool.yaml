@@ -1,4 +1,4 @@
-# Use a dedicated test ATE installation or verify that unrelated templates cannot use this pool.
+# 전용 개발계의 ARM64 gVisor Echo 풀
 apiVersion: ate.dev/v1
 kind: WorkerPool
 metadata:

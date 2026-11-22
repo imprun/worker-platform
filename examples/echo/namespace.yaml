@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wp-echo-example
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: echo-deployer
+  namespace: wp-echo-example
+automountServiceAccountToken: false
