@@ -1,0 +1,9 @@
+FROM golang:1.27.4 AS build
+WORKDIR /src
+COPY cmd/echo ./cmd/echo
+RUN CGO_ENABLED=0 go build -trimpath -o /out/ax-task-runner ./cmd/echo/main.go
+
+FROM scratch
+COPY --from=build /out/ax-task-runner /usr/local/bin/ax-task-runner
+EXPOSE 80
+ENTRYPOINT ["/usr/local/bin/ax-task-runner"]
