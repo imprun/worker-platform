@@ -20,6 +20,8 @@ func TestEchoContract(t *testing.T) {
 		{"POST", "/invoke", `{"message":"hello"}{}`, 400},
 		{"POST", "/attempt", `{"runId":"test-run","attempt":1,"input":{"message":"hello"}}`, 200},
 		{"POST", "/attempt", `{"runId":"test-run","attempt":0,"input":{"message":"hello"}}`, 400},
+		{"POST", "/attempt", `{"runId":"test-run","attempt":1,"input":{"message":"hello"},"siteSession":{"ref":"test","version":1,"state":{"mockCookie":"expired-for-echo"}}}`, 428},
+		{"POST", "/attempt", `{"runId":"test-run","attempt":2,"input":{"message":"hello"},"siteSession":{"ref":"test","version":2,"state":{"mockCookie":"approved-for-echo"}}}`, 200},
 	} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))

@@ -2,7 +2,7 @@
 
 Worker Platform은 Job의 접수를 PostgreSQL에 보관하고, ATE에서 시도별 Actor를 만들어 작업을 수행한다. 호출자가 보는 Run ID와 리비전은 첫 접수부터 재시도·HITL을 거쳐 완료될 때까지 유지된다. 실행 기록과 결과는 Actor가 종료된 뒤에도 조회할 수 있다. [아키텍처](architecture.md) · [운영 요구사항](requirements.md)
 
-현재 구현의 접수·조회 API와 Actor 정리 후 재시도는 단일 Job 가이드에서 확인할 수 있다. 아래의 설계는 러너 프로세스 lease와 인증 대기까지 포함하는 운영 릴리스의 목표다. [현재 Job API와 배포](job-api.md)
+현재 구현은 단일 Job 접수·조회와 Actor 정리 후 재시도, 사이트 세션 재인증을 지원한다. 아래의 설계는 러너 실행권과 인증용 Actor까지 포함하는 운영 릴리스의 목표다. [현재 Job API와 배포](job-api.md) · [사이트 세션과 재인증](site-session-reauth.md)
 
 ## 공개 API와 실행 소유권
 

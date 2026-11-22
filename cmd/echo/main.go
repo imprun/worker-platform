@@ -64,15 +64,42 @@ func echo(w http.ResponseWriter, r *http.Request) {
 
 func echoAttempt(w http.ResponseWriter, r *http.Request) {
 	var job struct {
-		RunID   string      `json:"runId"`
-		Attempt int         `json:"attempt"`
-		Input   echoPayload `json:"input"`
+		RunID   string           `json:"runId"`
+		Attempt int              `json:"attempt"`
+		Input   echoPayload      `json:"input"`
+		Session *mockSiteSession `json:"siteSession,omitempty"`
 	}
-	if !decodeEcho(w, r, 64*1024+256, &job) || job.RunID == "" || job.Attempt < 1 || job.Input.Message == nil {
+	if !decodeEcho(w, r, (64+16)*1024+256, &job) || job.RunID == "" || job.Attempt < 1 || job.Input.Message == nil {
 		http.Error(w, "expected a Job attempt with a string message", http.StatusBadRequest)
 		return
 	}
-	writeEcho(w, job.Input)
+	if job.Session == nil {
+		writeEcho(w, job.Input)
+		return
+	}
+	echoWithMockSession(w, job.Input, *job.Session)
+}
+
+type mockSiteSession struct {
+	Ref     string `json:"ref"`
+	Version int64  `json:"version"`
+	State   struct {
+		MockCookie string `json:"mockCookie"`
+	} `json:"state"`
+}
+
+func echoWithMockSession(w http.ResponseWriter, payload echoPayload, session mockSiteSession) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if session.State.MockCookie != "approved-for-echo" {
+		w.WriteHeader(http.StatusPreconditionRequired)
+		_ = json.NewEncoder(w).Encode(map[string]string{"code": "site_session_expired"})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(struct {
+		echoPayload
+		SiteSessionVersion int64 `json:"siteSessionVersion"`
+	}{payload, session.Version})
 }
 
 func decodeEcho(w http.ResponseWriter, r *http.Request, limit int64, value any) bool {

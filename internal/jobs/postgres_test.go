@@ -26,7 +26,7 @@ func TestPostgresRunRetryKeepsRevisionAndOneResult(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	scope := fmt.Sprintf("test-%d", time.Now().UnixNano())
-	store, err := Open(ctx, dsn, scope)
+	store, err := Open(ctx, dsn, scope, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestPostgresRunRetryKeepsRevisionAndOneResult(t *testing.T) {
 	}
 
 	token := strings.Repeat("t", 32)
-	handler := Handler(store, func(context.Context, string) (Publication, error) { return worker, nil }, token)
+	handler := Handler(store, func(context.Context, string) (Publication, error) { return worker, nil }, token, "")
 	submit := func(body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPost, "/v1/workers/echo/runs", strings.NewReader(body))
 		r.Header.Set("Authorization", "Bearer "+token)
@@ -94,7 +94,7 @@ func TestPostgresRunRetryKeepsRevisionAndOneResult(t *testing.T) {
 	if err := store.recordActor(ctx, oldLease, "actor-before-crash"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.startInvocation(ctx, oldLease, "actor-before-crash", assigned(t)); err != nil {
+	if err := store.startInvocation(ctx, oldLease, "actor-before-crash", assigned(t), 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.pool.Exec(ctx, "UPDATE wp_job_runs SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1", first.RunID); err != nil {

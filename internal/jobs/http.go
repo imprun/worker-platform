@@ -21,6 +21,7 @@ var (
 	runIDPattern      = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	workerNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
 	idempotencyKey    = regexp.MustCompile(`^[!-~]{1,128}$`)
+	siteRefPattern    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 )
 
 type ResolvePublication func(context.Context, string) (Publication, error)
@@ -30,12 +31,25 @@ type httpAPI struct {
 	resolve ResolvePublication
 }
 
-func Handler(store *Store, resolve ResolvePublication, token string) http.Handler {
+func Handler(store *Store, resolve ResolvePublication, token, providerToken string) http.Handler {
 	api := httpAPI{store: store, resolve: resolve}
+	public := http.NewServeMux()
+	public.HandleFunc("POST /v1/workers/{worker}/runs", api.submit)
+	public.HandleFunc("GET /v1/runs/{id}", api.status)
+	public.HandleFunc("GET /v1/runs/{id}/result", api.result)
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/workers/{worker}/runs", api.submit)
-	mux.HandleFunc("GET /v1/runs/{id}", api.status)
-	mux.HandleFunc("GET /v1/runs/{id}/result", api.result)
+	if providerToken != "" && store.siteCipher != nil {
+		public.HandleFunc("POST /v1/runs/{id}/reauth/{request}/start", api.startReauth)
+		internal := http.NewServeMux()
+		internal.HandleFunc("POST /internal/v1/workers/{worker}/site-sessions/{ref}", api.createSiteSession)
+		internal.HandleFunc("POST /internal/v1/runs/{id}/reauth/{request}/complete", api.completeReauth)
+		mux.Handle("/internal/v1/", authenticated(providerToken, internal))
+	}
+	mux.Handle("/", authenticated(token, public))
+	return mux
+}
+
+func authenticated(token string, next http.Handler) http.Handler {
 	digest := sha256.Sum256([]byte("Bearer " + token))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -47,7 +61,7 @@ func Handler(store *Store, resolve ResolvePublication, token string) http.Handle
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 		defer cancel()
-		mux.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -61,6 +75,15 @@ func (api httpAPI) submit(w http.ResponseWriter, r *http.Request) {
 	if len(key) != 1 || !idempotencyKey.MatchString(key[0]) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_idempotency_key"})
 		return
+	}
+	var sessionRef string
+	header := r.Header.Values("Site-Session-Ref")
+	if len(header) > 0 {
+		if len(header) != 1 || !siteRefPattern.MatchString(header[0]) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_site_session_ref"})
+			return
+		}
+		sessionRef = header[0]
 	}
 	input, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPayload))
 	var sizeErr *http.MaxBytesError
@@ -77,7 +100,7 @@ func (api httpAPI) submit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	run, err := api.store.Admit(r.Context(), worker, publication, key[0], input)
+	run, err := api.store.Admit(r.Context(), worker, publication, key[0], input, sessionRef)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -140,6 +163,12 @@ func writeError(w http.ResponseWriter, err error) {
 		code, reason = http.StatusConflict, "idempotency_conflict"
 	case errors.Is(err, ErrInvalidJSON):
 		code, reason = http.StatusBadRequest, "invalid_json"
+	case errors.Is(err, ErrAuthDisabled):
+		code, reason = http.StatusConflict, "site_sessions_disabled"
+	case errors.Is(err, ErrAuthConflict):
+		code, reason = http.StatusConflict, "reauth_conflict"
+	case errors.Is(err, ErrInvalidExpiry):
+		code, reason = http.StatusBadRequest, "invalid_site_session_expiry"
 	default:
 		// Database errors can include a constraint detail containing input.
 		slog.Warn("Job API unavailable", "errorType", fmt.Sprintf("%T", err))

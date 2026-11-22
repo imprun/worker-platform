@@ -21,7 +21,8 @@
 | ATE 직접 배포의 첫 구현 | 파일 기반 v1alpha2 명세로 전용 ARM64 gVisor 풀에 Echo를 배포했다. Gateway 경유 HTTP 200, Router의 클라이언트 인증서 검증과 같은 리비전의 Actor 재사용을 확인했다. [배포 실증](ate-deployment.md#개발계-검증-기록) |
 | CRD 배포 컨트롤러 | v1alpha3 워커와 프로필을 적용해 동기 HTTP 배포를 검증했다. 후보 준비 중 기존 Gateway 응답이 유지됐고, 롤백 후 기존 Actor UID와 HTTPRoute UID를 확인했다. [컨트롤러 실증](ate-controller.md#개발계-검증) |
 | 단일 Job 구현 | PostgreSQL 접수와 리비전 고정, Attempt Actor UID 기록, Worker 장애 후 새 Actor 재시도와 결과 조회를 검증했다. [개발계 실증](job-api.md#arm64-gvisor-개발계-검증) |
-| 첫 운영 릴리스 | 풀별 한도, 계정 세션과 HITL, 운영 대시보드를 포함한 인수 기준은 아래 표에 정리했다. |
+| 사이트 세션과 HITL 구현 | Actor·슬롯을 반환한 뒤 재인증을 기다리고, 중복 완료가 들어와도 같은 Run ID와 리비전으로 새 Actor에서 결과 한 건을 얻었다. [개발계 실증](site-session-reauth.md#arm64-gvisor-검증) |
+| 첫 운영 릴리스 | 풀별 한도, 운영 대시보드를 포함한 인수 기준은 아래 표에 정리했다. |
 
 ## 출시 인수 시험
 

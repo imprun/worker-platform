@@ -43,12 +43,12 @@ func (s *Store) recordActor(ctx context.Context, job claim, uid string) error {
 	})
 }
 
-func (s *Store) startInvocation(ctx context.Context, job claim, uid string, assignment *ate.WorkerAssignment) error {
+func (s *Store) startInvocation(ctx context.Context, job claim, uid string, assignment *ate.WorkerAssignment, sessionVersion int64) error {
 	return s.fenced(ctx, job, func(tx pgx.Tx) error {
 		changed, err := tx.Exec(ctx, `
-			UPDATE wp_job_attempts SET state='RUNNING', worker_id=$4, worker_pod_uid=$5
+			UPDATE wp_job_attempts SET state='RUNNING', worker_id=$4, worker_pod_uid=$5, site_session_version=$6
 			WHERE run_id=$1 AND number=$2 AND state='STARTING' AND actor_uid=$3 AND actor_uid<>''
-		`, job.id, job.number, uid, assignment.GetWorker().GetName(), assignment.GetWorkerPodUid())
+		`, job.id, job.number, uid, assignment.GetWorker().GetName(), assignment.GetWorkerPodUid(), sessionVersion)
 		if err := requireRow(changed, err); err != nil {
 			return err
 		}
@@ -61,9 +61,10 @@ func (s *Store) recordOutcome(ctx context.Context, job claim, value outcome) err
 	save := func(value outcome) error {
 		return s.fenced(ctx, job, func(tx pgx.Tx) error {
 			changed, err := tx.Exec(ctx, `
-				UPDATE wp_job_attempts SET state='RELEASING', outcome=$3::jsonb, reason=$4, retryable=$5
+				UPDATE wp_job_attempts SET state='RELEASING', outcome=$3::jsonb, reason=$4, retryable=$5,
+					reauth_required=$6::bigint>0, site_session_version=GREATEST(site_session_version,$6)
 				WHERE run_id=$1 AND number=$2 AND state IN ('STARTING','RUNNING')
-			`, job.id, job.number, value.result, value.reason, value.retryable)
+			`, job.id, job.number, value.result, value.reason, value.retryable, value.reauthVersion)
 			if err := requireRow(changed, err); err != nil {
 				return err
 			}
@@ -80,18 +81,21 @@ func (s *Store) recordOutcome(ctx context.Context, job claim, value outcome) err
 
 func (s *Store) finishAttempt(ctx context.Context, job claim) error {
 	return s.fenced(ctx, job, func(tx pgx.Tx) error {
-		var hasResult, canRetry bool
+		var hasResult, canRetry, needsAuth, inTime bool
 		var reason string
 		err := tx.QueryRow(ctx, `
-			SELECT a.outcome IS NOT NULL, a.retryable AND a.number<$3 AND r.deadline_at>clock_timestamp(), a.reason
+			SELECT a.outcome IS NOT NULL, a.retryable AND 1+(SELECT count(*) FROM wp_job_attempts previous
+				WHERE previous.run_id=r.id AND previous.state='FAILED' AND NOT previous.reauth_required)<$3,
+				a.reason, a.reauth_required, r.deadline_at>clock_timestamp()
 			FROM wp_job_attempts a JOIN wp_job_runs r ON r.id=a.run_id
 			WHERE a.run_id=$1 AND a.number=$2 AND a.state='RELEASING'
-		`, job.id, job.number, maxAttempts).Scan(&hasResult, &canRetry, &reason)
+		`, job.id, job.number, maxAttempts).Scan(&hasResult, &canRetry, &reason, &needsAuth, &inTime)
 		if err != nil {
 			return err
 		}
 		attemptState, runState := failed, failed
-		if hasResult {
+		switch {
+		case hasResult:
 			attemptState, runState = succeeded, succeeded
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO wp_job_results (run_id, attempt_no, value)
@@ -99,7 +103,19 @@ func (s *Store) finishAttempt(ctx context.Context, job claim) error {
 			`, job.id, job.number); err != nil {
 				return err
 			}
-		} else if canRetry {
+		case needsAuth && inTime:
+			runState = waitingAuth
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO wp_job_reauth_requests (run_id, attempt_no, site_session_id, expected_version, expires_at)
+				SELECT r.id, a.number, r.site_session_id, a.site_session_version, r.deadline_at
+				FROM wp_job_runs r JOIN wp_job_attempts a ON a.run_id=r.id AND a.number=r.attempt_no
+				WHERE r.id=$1
+			`, job.id); err != nil {
+				return err
+			}
+		case needsAuth:
+			reason = "reauth_deadline"
+		case canRetry && inTime:
 			runState = queued
 		}
 		if _, err := tx.Exec(ctx, `

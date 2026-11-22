@@ -86,6 +86,9 @@ func (e Engine) keepLease(ctx context.Context, stop context.CancelCauseFunc, job
 }
 
 func (e Engine) advance(ctx context.Context, job claim) error {
+	if job.state == waitingAuth {
+		return e.Store.expireReauth(ctx, job)
+	}
 	var attempt Attempt
 	var err error
 	if job.state == queued {
@@ -149,18 +152,32 @@ func (e Engine) prepareAndInvoke(ctx context.Context, job claim, attempt *Attemp
 		}
 		return false, e.Store.recordOutcome(ctx, job, outcome{reason: "actor_preparation_timeout", retryable: true})
 	}
-	if err := e.Store.startInvocation(ctx, job, attempt.ActorUID, assignment); err != nil {
+	session, valid, err := e.Store.sessionForAttempt(ctx, job.siteSessionID)
+	if err != nil {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		return false, e.Store.recordOutcome(ctx, job, outcome{reason: "site_session_unavailable"})
+	}
+	var version int64
+	if session != nil {
+		version = session.Version
+	}
+	if !valid {
+		return false, e.Store.recordOutcome(ctx, job, expiredSession(version))
+	}
+	if err := e.Store.startInvocation(ctx, job, attempt.ActorUID, assignment, version); err != nil {
 		return false, err
 	}
 	attempt.WorkerPodUID = assignment.GetWorkerPodUid()
-	value := e.invoke(ctx, job, *attempt)
+	value := e.invoke(ctx, job, *attempt, session)
 	if ctx.Err() != nil {
 		return false, ctx.Err()
 	}
 	return false, e.Store.recordOutcome(ctx, job, value)
 }
 
-func (e Engine) invoke(ctx context.Context, job claim, attempt Attempt) outcome {
+func (e Engine) invoke(ctx context.Context, job claim, attempt Attempt, session *siteSession) outcome {
 	deadline := time.Now().Add(callTimeout)
 	if job.deadline.Before(deadline) {
 		deadline = job.deadline
@@ -172,7 +189,8 @@ func (e Engine) invoke(ctx context.Context, job claim, attempt Attempt) outcome 
 		RunID   string          `json:"runId"`
 		Attempt int             `json:"attempt"`
 		Input   json.RawMessage `json:"input"`
-	}{job.id, attempt.Number, job.input})
+		Session *siteSession    `json:"siteSession,omitempty"`
+	}{job.id, attempt.Number, job.input, session})
 	if err != nil {
 		return outcome{reason: "invalid_input"}
 	}
@@ -182,6 +200,8 @@ func (e Engine) invoke(ctx context.Context, job claim, attempt Attempt) outcome 
 		switch {
 		case err != nil || code >= 500:
 			replies <- outcome{reason: "actor_unavailable", retryable: true}
+		case code == http.StatusPreconditionRequired && session != nil && isExpiredSession(body):
+			replies <- expiredSession(session.Version)
 		case code != http.StatusOK:
 			replies <- outcome{reason: "app_rejected_attempt"}
 		case len(body) > maxPayload || !validJSON(body):
@@ -207,4 +227,15 @@ func (e Engine) invoke(ctx context.Context, job claim, attempt Attempt) outcome 
 			}
 		}
 	}
+}
+
+func expiredSession(version int64) outcome {
+	return outcome{reason: "site_session_expired", reauthVersion: version}
+}
+
+func isExpiredSession(body []byte) bool {
+	var event struct {
+		Code string `json:"code"`
+	}
+	return len(body) <= maxPayload && validJSON(body) && json.Unmarshal(body, &event) == nil && event.Code == "site_session_expired"
 }

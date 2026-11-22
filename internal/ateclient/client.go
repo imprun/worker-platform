@@ -97,7 +97,7 @@ func (c *Client) InvokeAttempt(ctx context.Context, actor *ate.ObjectRef, body [
 		return 0, nil, err
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusPreconditionRequired {
 		return response.StatusCode, nil, nil
 	}
 	result, err := io.ReadAll(io.LimitReader(response.Body, limit+1))

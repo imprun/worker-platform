@@ -6,7 +6,7 @@ Worker Platform은 Kubernetes Gateway API로 워커를 호출하고, ATE 정책�
 
 `worker-controller`는 v1alpha3의 `HTTPWorker`와 `WorkerProfile`을 감시하고 ATE Control API를 직접 호출한다. 풀 선택, egress 적용, Worker 배정과 mTLS 준비 응답을 확인한 뒤 HTTPRoute를 게시한다. `workerctl`은 같은 배포 로직으로 v1alpha2 파일을 처리한다. [CRD 배포 가이드](ate-controller.md) · [CLI 직접 배포 가이드](ate-deployment.md)
 
-옵션으로 활성화하는 단일 Job API는 PostgreSQL에 Run과 리비전을 고정하고, 시도별 ATE Actor의 UID와 최종 결과를 기록한다. 별도 ARM64 gVisor 풀에서 Worker 장애 후 접수 당시 리비전으로 재시도하는 과정을 확인했다. 아래는 계정 세션, 풀별 한도, 운영 대시보드를 포함한 첫 운영 릴리스의 목표 설계다. [현재 Job API](job-api.md) · [출시 기준](design-review.md)
+옵션으로 활성화하는 단일 Job API는 PostgreSQL에 Run과 리비전을 고정하고, 시도별 ATE Actor의 UID와 최종 결과를 기록한다. 별도 ARM64 gVisor 풀에서 Worker 장애 후 재시도와 세션 만료 후 HITL 재개를 각각 접수 당시 리비전으로 검증했다. 아래는 풀별 한도와 운영 대시보드를 포함한 첫 운영 릴리스의 목표 설계다. [현재 Job API](job-api.md) · [사이트 세션과 HITL](site-session-reauth.md) · [출시 기준](design-review.md)
 
 ## 실행 경로와 책임
 
