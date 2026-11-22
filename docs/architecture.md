@@ -6,7 +6,11 @@ Worker Platform은 Kubernetes Gateway API로 워커를 호출하고, ATE 정책�
 
 `v0.1.0-alpha.1`의 `workerctl`은 파일로 받은 `HTTPWorker` v1alpha1을 검증해 AX Task와 HTTPRoute를 만든다. AX가 `Running`, Actor UID와 `Ready=True`를 보고하면 CLI가 소유권·UID·세대를 확인하고 라우트를 게시한다. 동일 digest와 설정으로 생성한 Task가 남아 있으면 롤백에서 재사용한다. Gateway의 상태 조회와 호출 확인은 운영자가 수행한다. 기존 Task의 보존과 정리도 운영자가 맡는다. [알파 배포 가이드](cluster-setup.md) · [CLI 배포 구현](../internal/platform/deploy.go) · [HTTPRoute 갱신 구현](../internal/platform/kubernetes.go)
 
-아래는 첫 운영 릴리스의 목표 설계다. ATE 직접 배포, Job API, 계정 세션, 운영 대시보드는 구현과 인수 시험이 남아 있다. [확인한 범위와 출시 기준](design-review.md)
+## ATE 직접 배포의 첫 구현
+
+`workerctl`은 v1alpha2 파일 명세와 `WorkerProfile`로 ATE Control API를 직접 호출한다. 풀 선택, egress 적용, Worker 배정과 mTLS 준비 응답, HTTPRoute의 현재 세대 조건을 확인한다. 전용 ARM64 gVisor 개발 풀에서 Gateway가 Router를 통해 Echo 응답을 반환하는 것을 검증했다. [배포 가이드와 검증 결과](ate-deployment.md)
+
+아래는 첫 운영 릴리스의 목표 설계다. 지속 배포 컨트롤러, Job API, 계정 세션, 운영 대시보드는 구현과 인수 시험이 남아 있다. [확인한 범위와 출시 기준](design-review.md)
 
 ## 실행 경로와 책임
 

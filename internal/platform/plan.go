@@ -23,6 +23,7 @@ type Route struct {
 	Kind       string          `json:"kind"`
 	Metadata   RouteMetadata   `json:"metadata"`
 	Spec       json.RawMessage `json:"spec"`
+	Status     *RouteStatus    `json:"status,omitempty"`
 }
 
 type RouteMetadata struct {
@@ -35,6 +36,9 @@ type RouteMetadata struct {
 func BuildPlan(w Worker) (Plan, error) {
 	if err := w.Validate(); err != nil {
 		return Plan{}, err
+	}
+	if w.APIVersion != WorkerVersion {
+		return Plan{}, fmt.Errorf("AX deployment requires %s", WorkerVersion)
 	}
 	owner := w.Metadata.Namespace + "/" + w.Metadata.Name
 	taskSpec := &ax.TaskSpec{
@@ -58,6 +62,11 @@ func BuildPlan(w Worker) (Plan, error) {
 		ApiVersion: "ax.io/v1alpha1", Kind: "Task", Spec: taskSpec,
 		Metadata: &ax.ObjectMeta{Name: name, Atespace: w.Spec.Atespace},
 	}
+	route, err := buildRoute(w, owner, w.Spec.Atespace+"/"+name)
+	return Plan{Task: task, Route: route}, err
+}
+
+func buildRoute(w Worker, owner, target string) (Route, error) {
 	t := w.Spec.Trigger
 	spec := map[string]any{
 		"parentRefs": []any{map[string]any{
@@ -69,7 +78,7 @@ func BuildPlan(w Worker) (Plan, error) {
 			"matches": []any{map[string]any{"method": "POST", "path": map[string]string{"type": "Exact", "value": t.Path}}},
 			"filters": []any{map[string]any{
 				"type": "RequestHeaderModifier", "requestHeaderModifier": map[string]any{
-					"set": []map[string]string{{"name": "ate-target-actor", "value": w.Spec.Atespace + "/" + name}},
+					"set": []map[string]string{{"name": "ate-target-actor", "value": target}},
 				},
 			}},
 			"backendRefs": []any{map[string]any{
@@ -80,11 +89,11 @@ func BuildPlan(w Worker) (Plan, error) {
 	}
 	raw, err := json.Marshal(spec)
 	if err != nil {
-		return Plan{}, err
+		return Route{}, err
 	}
-	return Plan{Task: task, Route: Route{
+	return Route{
 		APIVersion: GatewayAPI + "/v1", Kind: "HTTPRoute",
 		Metadata: RouteMetadata{ObjectName: w.Metadata, Annotations: map[string]string{OwnerAnnotation: owner}},
 		Spec:     raw,
-	}}, nil
+	}, nil
 }

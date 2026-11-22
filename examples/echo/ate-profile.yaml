@@ -1,0 +1,15 @@
+apiVersion: workerplatform.imprun.dev/v1alpha2
+kind: WorkerProfile
+metadata:
+  name: echo-arm64
+  namespace: workers
+spec:
+  atespace: workers-dev
+  workerPool:
+    name: echo-arm64-dev
+    namespace: ate-system
+  poolID: echo-arm64-dev
+  architecture: arm64
+  sandboxClass: gvisor
+  cpu: 20m
+  memory: 64Mi

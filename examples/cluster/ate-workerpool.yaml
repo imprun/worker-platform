@@ -1,0 +1,23 @@
+# Use a dedicated test ATE installation or verify that unrelated templates cannot use this pool.
+apiVersion: ate.dev/v1
+kind: WorkerPool
+metadata:
+  namespace: ate-system
+  name: echo-arm64-dev
+  labels:
+    workerplatform.imprun.dev/pool-id: echo-arm64-dev
+spec:
+  replicas: 1
+  workerImage: ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0@sha256:f8987236c6256f58c4b2625e543b43f4ae4bdded6ee6821c03d966effb7c0f17
+  sandboxClasses:
+    - name: gvisor
+  template:
+    nodeSelector:
+      kubernetes.io/arch: arm64
+    resources:
+      requests:
+        cpu: 60m
+        memory: 1Gi
+      limits:
+        cpu: 60m
+        memory: 1Gi

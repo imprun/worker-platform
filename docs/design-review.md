@@ -19,7 +19,8 @@
 | --- | --- |
 | 공개 알파 Go 코드 | `workerctl`이 AX Task와 라우트를 만들고, AX Ready 확인 뒤 소유한 라우트를 게시한다. Go 테스트와 CLI 출력에서 Echo 계약, 대상 헤더 덮어쓰기 설정, 모의 AX 준비·롤백, 라우트 UID·세대 조건을 확인했다. [클라이언트 테스트](../internal/platform/platform_test.go) · [Echo 테스트](../cmd/echo/main_test.go) |
 | 공개 알파의 클러스터 검증 | 초기 검증에서 ARM64 바이너리 빌드와 Gateway API 리소스의 서버 dry-run을 수행했다. 실제 Gateway–ATE mTLS 연결과 Actor 헤더 강제는 R1에서 확인할 항목이다. [알파 배포 가이드](cluster-setup.md) |
-| 첫 운영 릴리스 | ATE 직접 컨트롤러, Job API와 PostgreSQL, Run/Attempt 복구, 풀 한도, 계정 세션, 대시보드는 설계 단계다. 전체 흐름의 동작은 아래 인수 시험으로 입증한다. |
+| ATE 직접 배포의 첫 구현 | 파일 기반 v1alpha2 명세로 전용 ARM64 gVisor 풀에 Echo를 배포했다. Gateway 경유 HTTP 200, Router의 클라이언트 인증서 검증과 같은 리비전의 Actor 재사용을 확인했다. [배포 실증](ate-deployment.md#개발계-검증-기록) |
+| 첫 운영 릴리스 | 지속 ATE 직접 컨트롤러, Job API와 PostgreSQL, Run/Attempt 복구, 풀 한도, 계정 세션, 대시보드는 설계 단계다. 전체 흐름의 동작은 아래 인수 시험으로 입증한다. |
 
 ## 출시 인수 시험
 

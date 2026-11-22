@@ -1,0 +1,19 @@
+apiVersion: workerplatform.imprun.dev/v1alpha2
+kind: HTTPWorker
+metadata:
+  name: echo
+  namespace: workers
+spec:
+  profile: echo-arm64
+  image: registry.example.test/workers/echo@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  trigger:
+    hostname: echo.example.test
+    path: /invoke
+    gateway:
+      name: workers
+      namespace: workers
+      sectionName: http
+    router:
+      name: atenet-router
+      namespace: ate-system
+      port: 443

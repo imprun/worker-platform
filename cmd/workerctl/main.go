@@ -35,6 +35,8 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprintln(out, "Usage: workerctl render -f worker.yaml [-output all|task|route]")
 		fmt.Fprintln(out, "       workerctl deploy -f worker.yaml [-ax-address host:port] [-kube-context name]")
+		fmt.Fprintln(out, "       workerctl render -f worker-v1alpha2.yaml -profile profile.yaml [-output all|template|actor|policy|route]")
+		fmt.Fprintln(out, "       workerctl deploy -f worker-v1alpha2.yaml -profile profile.yaml -kube-context name [ATE and Router TLS options]")
 		return nil
 	}
 	command := args[0]
@@ -44,8 +46,10 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) error {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(diagnostics)
 	file := flags.String("f", "", "HTTPWorker manifest file (use - for stdin)")
+	profile := flags.String("profile", "", "WorkerProfile manifest for a v1alpha2 HTTPWorker")
 	var output, address, ca, serverName, kubeContext *string
 	var timeout *time.Duration
+	var direct ateOptions
 	if command == "render" {
 		output = flags.String("output", "all", "object to render (all, task, route)")
 	} else {
@@ -54,6 +58,7 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) error {
 		serverName = flags.String("ax-server-name", "", "override the AX TLS server name")
 		kubeContext = flags.String("kube-context", "", "kubectl context (defaults to its current context)")
 		timeout = flags.Duration("timeout", 2*time.Minute, "deployment deadline")
+		direct.register(flags)
 	}
 	if err := flags.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -77,11 +82,37 @@ func run(ctx context.Context, args []string, out, diagnostics io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if command == "deploy" && *timeout <= 0 {
+		return errors.New("timeout must be positive")
+	}
+	if worker.APIVersion == platform.ATEWorkerVersion {
+		if *profile == "" {
+			return errors.New("v1alpha2 HTTPWorker requires -profile")
+		}
+		data, err := os.Open(*profile)
+		if err != nil {
+			return fmt.Errorf("open WorkerProfile: %w", err)
+		}
+		defer data.Close()
+		p, err := platform.ReadWorkerProfile(data)
+		if err != nil {
+			return err
+		}
+		if command == "render" {
+			return renderATE(out, worker, p, *output)
+		}
+		if *kubeContext == "" {
+			return errors.New("ATE deployment requires an explicit -kube-context")
+		}
+		ctx, cancel := context.WithTimeout(ctx, *timeout)
+		defer cancel()
+		return direct.deploy(ctx, out, worker, p, *kubeContext)
+	}
+	if *profile != "" || direct != (ateOptions{}) {
+		return errors.New("WorkerProfile and ATE options require a v1alpha2 HTTPWorker")
+	}
 	if command == "render" {
 		return render(out, worker, *output)
-	}
-	if *timeout <= 0 {
-		return errors.New("timeout must be positive")
 	}
 	transport, err := axTransport(*address, *ca, *serverName)
 	if err != nil {

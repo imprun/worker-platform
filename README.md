@@ -5,9 +5,9 @@ Kubernetes Gateway API로 버전이 고정된 OCI 워커를 호출하고 ATE에�
 [![CI](https://github.com/imprun/worker-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/imprun/worker-platform/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**현재 공개 알파**의 `workerctl`은 AX Task를 만들고 Actor가 Ready가 되면 워커당 하나의 동기 `POST` HTTPRoute를 게시합니다. 같은 URL에서 리비전을 바꾸고, 보존한 AX Task로 롤백할 수 있습니다.
+**현재 `main`**의 `workerctl`은 `HTTPWorker` v1alpha2와 `WorkerProfile`로 ATE에 직접 배포합니다. Worker 배정과 Actor 준비를 확인한 뒤 동기 `POST` HTTPRoute를 게시합니다. [ATE 직접 배포 가이드](docs/ate-deployment.md)
 
-**첫 운영 릴리스의 설계**에는 ATE 직접 배포, 실행 ID 기반의 단일 Job, 장애 재시도와 HITL 재인증이 포함됩니다. 아래 실행 명령은 공개 알파에 해당합니다.
+공개 알파 `v0.1.0-alpha.1`의 v1alpha1 명세와 AX 배포 명령도 사용할 수 있습니다. 아래 알파 예제는 그 경로를 사용합니다. 실행 ID 기반의 단일 Job, 장애 재시도와 HITL 재인증은 운영 릴리스 설계에 있습니다.
 
 | 문서 | 내용 |
 | --- | --- |
@@ -15,6 +15,7 @@ Kubernetes Gateway API로 버전이 고정된 OCI 워커를 호출하고 ATE에�
 | [요구사항](docs/requirements.md) | 운영 범위 및 기능별 인수 기준 |
 | [단일 Job 실행 상세 설계](docs/job-execution-design.md) | API, 시도와 슬롯, 재시도, 사이트 세션과 운영 화면 |
 | [설계 검토와 검증 근거](docs/design-review.md) | 검토 결과, kagent·Testkube 소스, 출시 시험 |
+| [ATE 직접 배포](docs/ate-deployment.md) | 전용 풀과 Gateway 설정, CLI 배포, 실제 호출 검증 |
 | [공개 알파 클러스터 설정](docs/cluster-setup.md) | AX와 Gateway API로 Echo를 배포하고 호출하는 방법 |
 
 <a name="try-it-locally"></a>
