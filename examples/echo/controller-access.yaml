@@ -1,0 +1,69 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: wp-echo-example-controller-pool
+  namespace: ate-system
+rules:
+  - apiGroups: [ate.dev]
+    resources: [workerpools]
+    resourceNames: [echo-arm64-dev]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: wp-echo-example-controller-pool
+  namespace: ate-system
+subjects:
+  - kind: ServiceAccount
+    name: worker-controller
+    namespace: wp-echo-example
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: wp-echo-example-controller-pool
+---
+# ATE Control과 Router에 기존 ingress 정책이 적용된 개발계용이다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: wp-echo-example-controller-control
+  namespace: ate-system
+spec:
+  podSelector:
+    matchLabels:
+      app: ate-api-server
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: wp-echo-example
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: worker-controller
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: wp-echo-example-controller-router
+  namespace: ate-system
+spec:
+  podSelector:
+    matchLabels:
+      app: atenet-router
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: wp-echo-example
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: worker-controller
+      ports:
+        - protocol: TCP
+          port: https

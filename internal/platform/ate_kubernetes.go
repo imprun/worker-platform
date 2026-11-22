@@ -65,6 +65,11 @@ func (k Kubernetes) CheckWorkerPool(ctx context.Context, profile WorkerProfile) 
 	if err != nil {
 		return fmt.Errorf("read WorkerPool: %w", err)
 	}
+	return checkWorkerPool(data, profile)
+}
+
+func checkWorkerPool(data []byte, profile WorkerProfile) error {
+	p := profile.Spec
 	var pool struct {
 		Metadata struct {
 			ObjectName
@@ -100,6 +105,10 @@ func (k Kubernetes) GatewayProgrammed(ctx context.Context, ref GatewayRef) (bool
 	if err != nil {
 		return false, fmt.Errorf("read Gateway: %w", err)
 	}
+	return gatewayProgrammed(data, ref)
+}
+
+func gatewayProgrammed(data []byte, ref GatewayRef) (bool, error) {
 	var gateway struct {
 		Metadata RouteMetadata `json:"metadata"`
 		Status   struct {

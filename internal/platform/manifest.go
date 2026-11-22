@@ -25,26 +25,26 @@ type ObjectName struct {
 }
 
 type WorkerSpec struct {
-	Profile string      `yaml:"profile"`
-	Image   string      `yaml:"image"`
-	Trigger HTTPTrigger `yaml:"trigger"`
+	Profile string      `yaml:"profile" json:"profile"`
+	Image   string      `yaml:"image" json:"image"`
+	Trigger HTTPTrigger `yaml:"trigger" json:"trigger"`
 }
 
 type HTTPTrigger struct {
-	Hostname string     `yaml:"hostname"`
-	Path     string     `yaml:"path"`
-	Gateway  GatewayRef `yaml:"gateway"`
-	Router   RouterRef  `yaml:"router"`
+	Hostname string     `yaml:"hostname" json:"hostname"`
+	Path     string     `yaml:"path" json:"path"`
+	Gateway  GatewayRef `yaml:"gateway" json:"gateway"`
+	Router   RouterRef  `yaml:"router" json:"router"`
 }
 
 type GatewayRef struct {
 	ObjectName  `yaml:",inline"`
-	SectionName string `yaml:"sectionName"`
+	SectionName string `yaml:"sectionName" json:"sectionName"`
 }
 
 type RouterRef struct {
 	ObjectName `yaml:",inline"`
-	Port       int `yaml:"port"`
+	Port       int `yaml:"port" json:"port"`
 }
 
 var (

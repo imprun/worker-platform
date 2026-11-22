@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type ATECluster interface {
@@ -20,10 +21,12 @@ type ATECluster interface {
 }
 
 type ATEDeployment struct {
-	Control      ate.ControlClient
-	Cluster      ATECluster
-	Ready        func(context.Context, *ate.ObjectRef) (bool, error)
-	PollInterval time.Duration
+	Control       ate.ControlClient
+	Cluster       ATECluster
+	Ready         func(context.Context, *ate.ObjectRef) (bool, error)
+	PollInterval  time.Duration
+	WorkerOwner   *metav1.OwnerReference
+	BeforePublish func(context.Context) error
 }
 
 type ATEDeploymentResult struct {
@@ -38,7 +41,7 @@ type ATEDeploymentResult struct {
 }
 
 func (d ATEDeployment) Deploy(ctx context.Context, w Worker, p WorkerProfile) (ATEDeploymentResult, error) {
-	plan, err := BuildATEPlan(w, p)
+	plan, err := d.plan(w, p)
 	if err != nil {
 		return ATEDeploymentResult{}, err
 	}
@@ -46,7 +49,7 @@ func (d ATEDeployment) Deploy(ctx context.Context, w Worker, p WorkerProfile) (A
 	if err != nil {
 		return ATEDeploymentResult{}, fmt.Errorf("read HTTPRoute: %w", err)
 	}
-	if before != nil && before.Metadata.Annotations[OwnerAnnotation] != plan.Route.Metadata.Annotations[OwnerAnnotation] {
+	if before != nil && !plan.Route.owns(*before) {
 		return ATEDeploymentResult{}, fmt.Errorf("HTTPRoute %s/%s belongs to another owner", w.Metadata.Namespace, w.Metadata.Name)
 	}
 	if err := d.Cluster.CheckWorkerPool(ctx, p); err != nil {
@@ -76,6 +79,11 @@ func (d ATEDeployment) Deploy(ctx context.Context, w Worker, p WorkerProfile) (A
 	if currentTemplate.GetMetadata().GetUid() != templateUID || !matchesTemplate(plan.Template, currentTemplate) {
 		return ATEDeploymentResult{}, errors.New("ActorTemplate changed while the Actor was preparing")
 	}
+	if d.BeforePublish != nil {
+		if err := d.BeforePublish(ctx); err != nil {
+			return ATEDeploymentResult{}, err
+		}
+	}
 	if err := d.Cluster.Publish(ctx, plan.Route, before); err != nil {
 		return ATEDeploymentResult{}, fmt.Errorf("publish HTTPRoute: %w", err)
 	}
@@ -87,6 +95,23 @@ func (d ATEDeployment) Deploy(ctx context.Context, w Worker, p WorkerProfile) (A
 		Worker: assignment.GetWorker().GetName(), WorkerPod: assignment.GetWorkerPod(),
 		Route: w.Metadata.Namespace + "/" + w.Metadata.Name, Status: "published",
 	}, nil
+}
+
+func (d ATEDeployment) plan(w Worker, p WorkerProfile) (ATEPlan, error) {
+	if d.WorkerOwner == nil {
+		return BuildATEPlan(w, p)
+	}
+	ref := *d.WorkerOwner
+	if ref.UID == "" || ref.Kind != "HTTPWorker" || ref.Name != w.Metadata.Name {
+		return ATEPlan{}, errors.New("invalid HTTPWorker owner")
+	}
+	owner := "httpworker:" + w.Metadata.Namespace + "/" + w.Metadata.Name + "/" + string(ref.UID)
+	plan, err := buildATEPlan(w, p, owner)
+	if err != nil {
+		return ATEPlan{}, err
+	}
+	plan.Route.Metadata.OwnerReferences = []metav1.OwnerReference{ref}
+	return plan, nil
 }
 
 func objectRef(meta *ate.ResourceMetadata) *ate.ObjectRef {
@@ -246,7 +271,7 @@ func (d ATEDeployment) awaitRoute(ctx context.Context, route Route, gateway Gate
 		if err != nil {
 			return false, err
 		}
-		if current == nil || current.Metadata.Annotations[OwnerAnnotation] != route.Metadata.Annotations[OwnerAnnotation] {
+		if current == nil || !route.owns(*current) {
 			return false, errors.New("HTTPRoute disappeared or its ownership changed after publication")
 		}
 		patch, err := routePatch(route, current)

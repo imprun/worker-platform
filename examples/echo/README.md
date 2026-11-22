@@ -1,6 +1,6 @@
 # ATE Echo 예제
 
-Go로 작성한 Echo를 ARM64 이미지로 빌드하고, `workerctl`로 ATE Actor를 배포한다. `POST /invoke`는 Kubernetes Gateway를 거치며, Gateway는 ATE Router의 서버 인증서를 검증하고 클라이언트 인증서를 제시한다. [Echo 소스](../../cmd/echo/main.go) · [이미지 레시피](../../Dockerfile.echo)
+Go로 작성한 Echo를 ARM64 이미지로 빌드하고, `workerctl`로 ATE Actor를 배포한다. `POST /invoke`는 Kubernetes Gateway를 거치며, Gateway는 ATE Router의 서버 인증서를 검증하고 클라이언트 인증서를 제시한다. 같은 환경에서 CRD를 적용하려면 컨트롤러 배포 가이드를 따른다. [Echo 소스](../../cmd/echo/main.go) · [이미지 레시피](../../Dockerfile.echo) · [kubectl apply 예제](../../docs/ate-controller.md)
 
 ## 개발계 준비
 

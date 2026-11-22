@@ -1,0 +1,13 @@
+FROM --platform=$BUILDPLATFORM golang:1.27.4 AS build
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY cmd/worker-controller ./cmd/worker-controller
+COPY internal ./internal
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/worker-controller ./cmd/worker-controller
+
+FROM scratch
+COPY --from=build /out/worker-controller /usr/local/bin/worker-controller
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/worker-controller"]

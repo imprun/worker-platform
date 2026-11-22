@@ -4,9 +4,9 @@ Worker Platform은 Kubernetes Gateway API로 워커를 호출하고, ATE 정책�
 
 ## 현재 구현된 ATE 직접 배포
 
-`workerctl`은 v1alpha2의 `HTTPWorker`와 `WorkerProfile`을 읽어 ATE Control API를 직접 호출한다. 풀 선택, egress 적용, Worker 배정과 mTLS 준비 응답, HTTPRoute의 현재 세대 조건을 확인한다. 전용 ARM64 gVisor 개발 풀에서 Gateway가 Router를 통해 Echo 응답을 반환하는 것을 검증했다. [배포 가이드와 검증 결과](ate-deployment.md) · [HTTPRoute 갱신 구현](../internal/platform/kubernetes.go)
+`worker-controller`는 v1alpha3의 `HTTPWorker`와 `WorkerProfile`을 감시하고 ATE Control API를 직접 호출한다. 풀 선택, egress 적용, Worker 배정과 mTLS 준비 응답을 확인한 뒤 HTTPRoute를 게시한다. `workerctl`은 같은 배포 로직으로 v1alpha2 파일을 처리한다. [CRD 배포 가이드](ate-controller.md) · [CLI 직접 배포 가이드](ate-deployment.md)
 
-아래는 첫 운영 릴리스의 목표 설계다. 지속 배포 컨트롤러, Job API, 계정 세션, 운영 대시보드는 구현과 인수 시험이 남아 있다. [확인한 범위와 출시 기준](design-review.md)
+아래는 첫 운영 릴리스의 목표 설계다. Job API, 계정 세션, 운영 대시보드는 구현과 인수 시험이 남아 있다. [확인한 범위와 출시 기준](design-review.md)
 
 ## 실행 경로와 책임
 
@@ -42,7 +42,7 @@ kagent에서 검증한 리비전·Actor 관리 패턴은 공개 ATE API로 구�
 
 ## 워커 선언과 실행 프로필
 
-- `HTTPWorker`는 OCI 이미지 digest, 입력·결과 스키마, 실행 프로필 참조와 활성화할 호출 방식을 선언한다. 앱은 자신이 선택한 언어로 러너 계약을 구현한 이미지를 제공한다. 동기 호출을 열 때는 승인된 호스트와 정확한 `POST` 경로를 지정한다. 컨트롤러가 관리하는 영역에서는 Gateway 리스너·호스트·메서드·경로 조합을 워커 하나만 소유할 수 있다. 현재 CLI는 v1alpha2 파일 명세를 사용하며 지속 배포용 Kubernetes 리소스는 별도 버전으로 설계한다.
+- `HTTPWorker`는 OCI 이미지 digest, 실행 프로필 참조, 승인된 호스트와 정확한 `POST` 경로를 선언한다. 앱은 자신이 선택한 언어로 러너 계약을 구현한 이미지를 제공한다. 운영자는 Gateway 리스너·호스트·메서드·경로 조합을 워커 하나에 배정한다. CRD는 v1alpha3을 사용한다. 입력·결과 스키마를 이용한 Job 접수는 단일 Job 실행 설계에 정의한다.
 - 운영자가 관리하는 `WorkerProfile`은 환경, Atespace, 물리 WorkerPool, 샌드박스 클래스, CPU 아키텍처, Actor의 CPU·메모리, 허용 목적지와 시크릿 참조를 정한다. Job 접수·동시 실행 한도, 기한·보존 정책도 운영자가 정한다. 앱 팀은 자신에게 승인된 프로필을 선택한다.
 - **리비전**은 워커 UID, 이미지 digest, 입력·결과와 러너 계약 버전, 유효 실행 설정을 정규화해 식별한다. ATE 템플릿의 참조·UID·불변 설정 digest를 함께 보관한다. 호스트·라우트 변경과 실시간 용량 한도는 배포 설정으로 관리한다.
 - **Job**은 호출자가 제출한 단일 작업이다. **Run**은 실행 ID를 가진 접수 기록이고 **Attempt**는 그 실행을 처리하는 개별 시도다. **Actor**는 해당 서비스를 제공하거나 시도를 처리하는 ATE 샌드박스이며, **Worker**는 ATE가 그 샌드박스를 배정한 실제 실행 노드의 Worker 리소스다.

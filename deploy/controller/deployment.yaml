@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-controller
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: worker-controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: worker-controller
+    spec:
+      serviceAccountName: worker-controller
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controller
+          image: registry.example.test/workers/worker-controller@sha256:1111111111111111111111111111111111111111111111111111111111111111
+          args:
+            - -ate-address=api.ate-system.svc:443
+            - -ate-ca=/etc/ate/trust/control-ca.crt
+            - -ate-token-file=/var/run/ate/token
+            - -router-url=https://atenet-router.ate-system.svc:443
+            - -router-ca=/etc/ate/trust/router-ca.crt
+            - -router-cert=/etc/ate/router/tls.crt
+            - -router-key=/etc/ate/router/tls.key
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: ate-token
+              mountPath: /var/run/ate
+              readOnly: true
+            - name: ate-trust
+              mountPath: /etc/ate/trust
+              readOnly: true
+            - name: router-client
+              mountPath: /etc/ate/router
+              readOnly: true
+      volumes:
+        - name: ate-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  audience: api.ate-system.svc
+                  expirationSeconds: 3600
+        - name: ate-trust
+          configMap:
+            name: ate-trust
+        - name: router-client
+          secret:
+            secretName: router-client

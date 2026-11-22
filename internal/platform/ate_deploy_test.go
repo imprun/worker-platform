@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func ateExample(t *testing.T) (Worker, WorkerProfile) {
@@ -101,6 +102,15 @@ func TestATEDirectDeploymentGatesRouteAndReusesRevisions(t *testing.T) {
 		t.Fatal("failed rollout changed the current route")
 	}
 	failProbe = false
+	stale := errors.New("newer generation")
+	d.BeforePublish = func(context.Context) error { return stale }
+	if _, err := d.Deploy(t.Context(), upgrade, p); !errors.Is(err, stale) {
+		t.Fatalf("expected publication guard to reject a ready candidate, got %v", err)
+	}
+	if string(cluster.route.Spec) != previous || cluster.publications != 1 {
+		t.Fatal("superseded rollout changed the current route")
+	}
+	d.BeforePublish = nil
 	upgraded, err := d.Deploy(t.Context(), upgrade, p)
 	if err != nil || upgraded.ActorUID == first.ActorUID {
 		t.Fatalf("upgrade did not select another Actor: %+v, %v", upgraded, err)
@@ -116,6 +126,34 @@ func TestATEDirectDeploymentGatesRouteAndReusesRevisions(t *testing.T) {
 	cluster.route.Metadata.Annotations[OwnerAnnotation] = w.Metadata.Namespace + "/" + w.Metadata.Name
 	if _, err := d.Deploy(t.Context(), w, p); err == nil || len(control.mutations) != 8 {
 		t.Fatalf("ATE deployment accepted a route owned by another deployer: %v", err)
+	}
+}
+
+func TestHTTPWorkerUIDIsolatesRevisions(t *testing.T) {
+	w, p := ateExample(t)
+	local, err := BuildATEPlan(w, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := &metav1.OwnerReference{
+		APIVersion: "workerplatform.imprun.dev/v1alpha3", Kind: w.Kind, Name: w.Metadata.Name, UID: "worker-1",
+	}
+	d := ATEDeployment{WorkerOwner: ref}
+	first, err := d.plan(w, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Revision == local.Revision || first.Route.owns(local.Route) ||
+		len(first.Route.Metadata.OwnerReferences) != 1 || first.Route.Metadata.OwnerReferences[0].UID != ref.UID {
+		t.Fatal("Kubernetes-owned route or Actor overlaps the file-based deployment")
+	}
+	ref.UID = "worker-2"
+	next, err := d.plan(w, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Revision == first.Revision || next.Route.owns(first.Route) {
+		t.Fatal("a new HTTPWorker UID inherited an earlier deployment")
 	}
 }
 

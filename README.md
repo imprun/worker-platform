@@ -5,7 +5,7 @@ Kubernetes Gateway API로 버전이 고정된 OCI 워커를 호출하고 ATE에�
 [![CI](https://github.com/imprun/worker-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/imprun/worker-platform/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**현재 `main`**의 `workerctl`은 `HTTPWorker` v1alpha2와 `WorkerProfile`로 ATE에 직접 배포합니다. Worker 배정과 Actor 준비를 확인한 뒤 동기 `POST` HTTPRoute를 게시합니다. [ATE 직접 배포 가이드](docs/ate-deployment.md)
+**현재 `main`**의 `worker-controller`는 `kubectl apply`로 등록한 v1alpha3 `HTTPWorker`와 `WorkerProfile`을 감시해 ATE에 직접 배포합니다. Worker 배정과 Actor 준비를 확인한 뒤 동기 `POST` HTTPRoute를 게시합니다. [컨트롤러 설치·업데이트·롤백](docs/ate-controller.md)
 
 이미지 빌드, ARM64 gVisor 풀, Gateway mTLS 설정, 실제 호출을 한 흐름으로 따라 할 수 있습니다. [Echo 전체 예제](examples/echo/)
 
@@ -48,4 +48,4 @@ Echo는 `{"message":"hello"}`를 반환합니다. `render`는 생성할 Kubernet
 ECHO_REPOSITORY=registry.example.test/workers/echo sh examples/echo/run.sh
 ```
 
-배포에는 `workerplatform.imprun.dev/v1alpha2`의 `HTTPWorker`와 `WorkerProfile`을 사용합니다. [명세 전환](docs/ate-deployment.md#명세-전환) · [기여와 테스트](CONTRIBUTING.md) · [보안 문의](SECURITY.md)
+로컬에서 `workerctl`로 렌더링하거나 직접 배포할 때는 `workerplatform.imprun.dev/v1alpha2` 파일을 사용합니다. [CLI 배포 가이드](docs/ate-deployment.md) · [기여와 테스트](CONTRIBUTING.md) · [보안 문의](SECURITY.md)

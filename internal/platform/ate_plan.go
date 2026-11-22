@@ -27,20 +27,20 @@ type WorkerProfile struct {
 }
 
 type WorkerProfileSpec struct {
-	Atespace     string       `yaml:"atespace"`
-	WorkerPool   ObjectName   `yaml:"workerPool"`
-	PoolID       string       `yaml:"poolID"`
-	Architecture string       `yaml:"architecture"`
-	SandboxClass string       `yaml:"sandboxClass"`
-	CPU          string       `yaml:"cpu"`
-	Memory       string       `yaml:"memory"`
-	Egress       []EgressRule `yaml:"egress"`
+	Atespace     string       `yaml:"atespace" json:"atespace"`
+	WorkerPool   ObjectName   `yaml:"workerPool" json:"workerPool"`
+	PoolID       string       `yaml:"poolID" json:"poolID"`
+	Architecture string       `yaml:"architecture" json:"architecture"`
+	SandboxClass string       `yaml:"sandboxClass" json:"sandboxClass"`
+	CPU          string       `yaml:"cpu" json:"cpu"`
+	Memory       string       `yaml:"memory" json:"memory"`
+	Egress       []EgressRule `yaml:"egress" json:"egress"`
 }
 
 type EgressRule struct {
-	Protocol string `yaml:"protocol"`
-	Hostname string `yaml:"hostname"`
-	Port     int32  `yaml:"port"`
+	Protocol string `yaml:"protocol" json:"protocol"`
+	Hostname string `yaml:"hostname" json:"hostname"`
+	Port     int32  `yaml:"port" json:"port"`
 }
 
 func ReadWorkerProfile(r io.Reader) (WorkerProfile, error) {
@@ -133,6 +133,10 @@ type ATEPlan struct {
 }
 
 func BuildATEPlan(w Worker, p WorkerProfile) (ATEPlan, error) {
+	return buildATEPlan(w, p, "ate:"+w.Metadata.Namespace+"/"+w.Metadata.Name)
+}
+
+func buildATEPlan(w Worker, p WorkerProfile, owner string) (ATEPlan, error) {
 	if err := w.Validate(); err != nil {
 		return ATEPlan{}, err
 	}
@@ -142,7 +146,6 @@ func BuildATEPlan(w Worker, p WorkerProfile) (ATEPlan, error) {
 	if p.Metadata.Namespace != w.Metadata.Namespace || p.Metadata.Name != w.Spec.Profile {
 		return ATEPlan{}, errors.New("WorkerProfile name and namespace must match the worker's profile reference")
 	}
-	owner := "ate:" + w.Metadata.Namespace + "/" + w.Metadata.Name
 	template := &ate.ActorTemplate{
 		WorkerSelector: &ate.Selector{MatchLabels: map[string]string{PoolIDLabel: p.Spec.PoolID}},
 		Containers: []*ate.Container{{

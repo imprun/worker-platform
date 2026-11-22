@@ -1,0 +1,15 @@
+apiVersion: workerplatform.imprun.dev/v1alpha3
+kind: WorkerProfile
+metadata:
+  name: echo-arm64
+  namespace: wp-echo-example
+spec:
+  atespace: wp-echo-example
+  workerPool:
+    name: echo-arm64-dev
+    namespace: ate-system
+  poolID: echo-arm64-dev
+  architecture: arm64
+  sandboxClass: gvisor
+  cpu: 20m
+  memory: 64Mi

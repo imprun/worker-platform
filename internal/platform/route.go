@@ -1,6 +1,11 @@
 package platform
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"reflect"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 const (
 	OwnerAnnotation = "workerplatform.imprun.dev/owner"
@@ -17,9 +22,15 @@ type Route struct {
 
 type RouteMetadata struct {
 	ObjectName
-	Annotations map[string]string `json:"annotations,omitempty"`
-	UID         string            `json:"uid,omitempty"`
-	Generation  int64             `json:"generation,omitempty"`
+	Annotations     map[string]string       `json:"annotations,omitempty"`
+	UID             string                  `json:"uid,omitempty"`
+	Generation      int64                   `json:"generation,omitempty"`
+	OwnerReferences []metav1.OwnerReference `json:"ownerReferences,omitempty"`
+}
+
+func (r Route) owns(other Route) bool {
+	return r.Metadata.Annotations[OwnerAnnotation] == other.Metadata.Annotations[OwnerAnnotation] &&
+		(len(r.Metadata.OwnerReferences) == 0 || reflect.DeepEqual(r.Metadata.OwnerReferences, other.Metadata.OwnerReferences))
 }
 
 func buildRoute(w Worker, owner, target string) (Route, error) {

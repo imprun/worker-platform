@@ -19,6 +19,7 @@
 | --- | --- |
 | 배포 코드 | v1alpha2 명세 검증, Actor 대상 헤더 설정, 후보 준비 실패 시 기존 라우트 보존, 롤백의 Actor 재사용, 라우트 UID·세대·소유권 사전조건을 Go 테스트에서 확인했다. [배포 테스트](../internal/platform/ate_deploy_test.go) · [라우트와 명세 테스트](../internal/platform/platform_test.go) |
 | ATE 직접 배포의 첫 구현 | 파일 기반 v1alpha2 명세로 전용 ARM64 gVisor 풀에 Echo를 배포했다. Gateway 경유 HTTP 200, Router의 클라이언트 인증서 검증과 같은 리비전의 Actor 재사용을 확인했다. [배포 실증](ate-deployment.md#개발계-검증-기록) |
+| CRD 배포 컨트롤러 | v1alpha3 워커와 프로필을 적용해 동기 HTTP 배포를 검증했다. 후보 준비 중 기존 Gateway 응답이 유지됐고, 롤백 후 기존 Actor UID와 HTTPRoute UID를 확인했다. [컨트롤러 실증](ate-controller.md#개발계-검증) |
 | 첫 운영 릴리스 | 지속 ATE 직접 컨트롤러, Job API와 PostgreSQL, Run/Attempt 복구, 풀 한도, 계정 세션, 대시보드는 설계 단계다. 전체 흐름의 동작은 아래 인수 시험으로 입증한다. |
 
 ## 출시 인수 시험

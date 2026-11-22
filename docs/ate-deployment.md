@@ -1,6 +1,6 @@
 # ATE 직접 배포
 
-`workerctl`은 `HTTPWorker` v1alpha2와 운영자가 준비한 `WorkerProfile`로 ATE Actor를 배포한다. Kubernetes Gateway의 동기 `POST` 호출은 ATE Router를 거쳐 해당 Actor로 전달된다. 실행 설정이 같은 명세는 리비전과 Actor를 재사용한다. [아키텍처](architecture.md)
+`workerctl`은 `HTTPWorker` v1alpha2 파일과 운영자가 준비한 `WorkerProfile`로 ATE Actor를 배포한다. Kubernetes Gateway의 동기 `POST` 호출은 ATE Router를 거쳐 해당 Actor로 전달된다. 실행 설정이 같은 명세는 리비전과 Actor를 재사용한다. `kubectl apply`로 배포를 관리할 때는 v1alpha3 CRD와 컨트롤러를 사용한다. [컨트롤러 배포 가이드](ate-controller.md) · [아키텍처](architecture.md)
 
 ## Echo 예제
 

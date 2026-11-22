@@ -1,0 +1,19 @@
+apiVersion: workerplatform.imprun.dev/v1alpha3
+kind: HTTPWorker
+metadata:
+  name: echo
+  namespace: wp-echo-example
+spec:
+  profile: echo-arm64
+  image: registry.example.test/workers/echo@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  trigger:
+    hostname: echo.example.test
+    path: /invoke
+    gateway:
+      name: echo
+      namespace: wp-echo-example
+      sectionName: http
+    router:
+      name: wp-echo-example-router
+      namespace: ate-system
+      port: 443

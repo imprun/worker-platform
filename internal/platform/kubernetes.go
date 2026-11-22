@@ -36,6 +36,10 @@ func (k Kubernetes) Read(ctx context.Context, ref ObjectName) (*Route, error) {
 	if err != nil || len(bytes.TrimSpace(data)) == 0 {
 		return nil, err
 	}
+	return decodeRoute(data, ref)
+}
+
+func decodeRoute(data []byte, ref ObjectName) (*Route, error) {
 	var route Route
 	if err := json.Unmarshal(data, &route); err != nil {
 		return nil, fmt.Errorf("decode HTTPRoute: %w", err)
@@ -56,21 +60,24 @@ func (k Kubernetes) Publish(ctx context.Context, want Route, before *Route) erro
 		_, err = k.command(ctx, ref.Namespace, data, "create", "-f", "-")
 		return err
 	}
-	owner := want.Metadata.Annotations[OwnerAnnotation]
 	current, err := k.Read(ctx, ref)
 	if err != nil {
 		return err
 	}
-	if current == nil || before.Metadata.UID != current.Metadata.UID || before.Metadata.Generation != current.Metadata.Generation ||
-		current.Metadata.Annotations[OwnerAnnotation] != owner || before.Metadata.Annotations[OwnerAnnotation] != owner {
-		return fmt.Errorf("HTTPRoute %s/%s changed while the release was preparing", ref.Namespace, ref.Name)
-	}
-	patch, err := routePatch(want, current)
+	patch, err := publishRoutePatch(want, before, current)
 	if err != nil || len(patch) == 0 {
 		return err
 	}
 	_, err = k.command(ctx, ref.Namespace, nil, "patch", routeResource, ref.Name, "--type=json", "--patch", string(patch))
 	return err
+}
+
+func publishRoutePatch(want Route, before, current *Route) ([]byte, error) {
+	if current == nil || before.Metadata.UID != current.Metadata.UID || before.Metadata.Generation != current.Metadata.Generation ||
+		!want.owns(*current) || !want.owns(*before) {
+		return nil, fmt.Errorf("HTTPRoute %s/%s changed while the release was preparing", want.Metadata.Namespace, want.Metadata.Name)
+	}
+	return routePatch(want, current)
 }
 
 func routePatch(want Route, current *Route) ([]byte, error) {
@@ -89,10 +96,13 @@ func routePatch(want Route, current *Route) ([]byte, error) {
 		Path  string `json:"path"`
 		Value any    `json:"value"`
 	}
-	return json.Marshal([]operation{
+	patch := []operation{
 		{"test", "/metadata/uid", current.Metadata.UID},
 		{"test", "/metadata/generation", current.Metadata.Generation},
 		{"test", "/metadata/annotations/workerplatform.imprun.dev~1owner", want.Metadata.Annotations[OwnerAnnotation]},
-		{"replace", "/spec", want.Spec},
-	})
+	}
+	if len(want.Metadata.OwnerReferences) != 0 {
+		patch = append(patch, operation{"test", "/metadata/ownerReferences", want.Metadata.OwnerReferences})
+	}
+	return json.Marshal(append(patch, operation{"replace", "/spec", want.Spec}))
 }
