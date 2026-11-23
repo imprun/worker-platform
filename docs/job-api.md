@@ -96,6 +96,31 @@ HTTP JSON 입력과 결과는 각각 64 KiB까지 허용한다. 클라이언트�
 
 기본 Run 기한은 5분이며 장애로 끝나는 시도는 최대 두 번이다. 세션 만료 시도는 인증 대기로 이어진다. 전송이 실패하거나 Worker 배정이 끊기면 이전 Attempt Actor의 삭제를 확인한 뒤 새 Actor로 시도한다. 컨트롤러가 중단되면 PostgreSQL의 작업 lease가 만료된 시도를 다음 실행기가 회수한다. 만료된 lease로는 새 상태나 결과를 기록할 수 없다. 성공 결과는 Run ID를 기본 키로 저장하고, Attempt 정리와 Run의 최종 상태를 같은 DB 트랜잭션에서 확정한다. 외부 서비스에서 발생하는 부수 효과에는 앱이 Run ID를 멱등 키로 사용한다.
 
+## WorkerPool별 실행 슬롯
+
+한 ATE 설치의 Job 컨트롤러 복제본은 같은 PostgreSQL을 사용한다. 운영자는 복제본을 한도 지원 버전으로 배포한 뒤 `wp_job_pool_limits`에 한도를 설정한다. 키는 `WorkerProfile.spec.workerPool`이 가리키는 Kubernetes `namespace/name`이다. 같은 풀을 가리키는 여러 프로필이나 워커 네임스페이스가 하나의 한도를 공유한다. 한도는 현재 DB 값으로 적용하고 Run의 앱 리비전은 접수 당시 값으로 유지한다.
+
+```sql
+INSERT INTO wp_job_pool_limits (worker_pool, max_slots)
+VALUES ('ate-system/echo-arm64-dev', 2), ('ate-system/echo-arm64-dev-b', 1)
+ON CONFLICT (worker_pool) DO UPDATE SET max_slots = EXCLUDED.max_slots;
+```
+
+`max_slots`가 `NULL`이거나 설정 행이 없으면 풀별 상한 없이 실행한다. `0`은 신규 슬롯 예약을 멈춘다. 기존 점유 수보다 낮은 값으로 변경하면 점유 수가 새 한도 밑으로 내려갈 때 예약을 재개한다. 복제본마다 풀별로 하나씩 Run을 진행할 수 있으므로, 여러 슬롯을 동시에 사용하려면 그만큼 실행 가능한 복제본이 필요하다. [스키마 및 기존 리비전 마이그레이션](../internal/jobs/schema_pool_slots.sql)
+
+풀 한도가 찬 경우에도 Job 제출은 `202`로 접수되고 Run은 슬롯 0개로 큐에서 기다린다. 스케줄러는 포화된 풀의 대기 Run을 건너뛴다. Actor 생성 전에 풀 한도 행을 잠가 사용량을 다시 계산하고, Attempt 기록과 예약을 같은 트랜잭션에서 커밋한다. `STARTING`, `RUNNING`, `RELEASING`이 슬롯을 점유한다. Actor 삭제를 확인한 뒤 슬롯이 반환되며, HITL 대기 상태의 점유 수는 0이다. [예약 확인](../internal/jobs/pool_slots.go) · [상태 전이](../internal/jobs/attempts.go)
+
+### 풀 두 개와 복제본 두 개 검증
+
+별도 ARM64 gVisor 풀 두 개와 Job 컨트롤러 복제본 두 개에서 각 풀에 Echo Run을 3건씩 제출했다. A 풀의 두 Run이 실행 중이고 세 번째 Run이 `QUEUED`인 동안 B 풀 Run이 성공했다. 모든 제출은 HTTP `202`로 접수됐다.
+
+| 풀 | 설정 한도 | Attempt 예약 이력의 최대 점유 | 완료 후 점유 |
+| --- | ---: | ---: | ---: |
+| `ate-system/echo-arm64-dev` | 2 | 2 | 0 |
+| `ate-system/echo-arm64-dev-b` | 1 | 1 | 0 |
+
+DB와 ATE의 Job Actor 배정을 117회 관찰하고, 전체 Attempt의 예약 시작·반환 시각도 대조했다. 6개 Run에서 Attempt와 결과가 각각 한 건씩 생성됐고 완료 뒤 Job Actor는 0개였다. 마이그레이션은 기존 리비전에서 두 풀을 채웠으며 먼저 저장해 둔 Run과 결과 2건을 보존했다. [PostgreSQL 예약 경합 테스트](../internal/jobs/pool_slots_test.go)
+
 ## ARM64 gVisor 개발계 검증
 
 ### 공통 런타임과 Echo 앱 패키지

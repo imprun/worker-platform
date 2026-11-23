@@ -74,6 +74,7 @@ type claim struct {
 	deadline           time.Time
 	input              json.RawMessage
 	siteSessionID      string
+	workerPool         string
 	revision           platform.JobRevision
 }
 

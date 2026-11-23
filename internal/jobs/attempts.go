@@ -15,6 +15,9 @@ func (s *Store) startAttempt(ctx context.Context, job claim) (Attempt, error) {
 	name := fmt.Sprintf("wp-job-%s-%d", strings.ReplaceAll(job.id, "-", ""), number)
 	var attempt Attempt
 	err := s.fenced(ctx, job, func(tx pgx.Tx) error {
+		if err := lockPoolSlot(ctx, tx, job.workerPool); err != nil {
+			return err
+		}
 		changed, err := tx.Exec(ctx, `
 			UPDATE wp_job_runs SET state='STARTING', attempt_no=$2, reason=''
 			WHERE id=$1 AND state='QUEUED' AND attempt_no=$2-1

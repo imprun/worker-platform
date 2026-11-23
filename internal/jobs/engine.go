@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/imprun/worker-platform/internal/platform"
@@ -27,24 +30,37 @@ type Engine struct {
 }
 
 func (e Engine) Run(ctx context.Context) error {
+	busy := make(map[string]struct{})
+	finished := make(chan string)
+	var running sync.WaitGroup
+	defer running.Wait()
+	tick := time.NewTicker(500 * time.Millisecond)
+	defer tick.Stop()
 	for ctx.Err() == nil {
 		db, cancel := context.WithTimeout(ctx, 5*time.Second)
-		job, err := e.Store.claim(db)
+		job, err := e.Store.claim(db, slices.Collect(maps.Keys(busy))...)
 		cancel()
 		if err == nil && job.id != "" {
-			err = e.process(ctx, job)
-			if err == nil {
-				continue
-			}
+			busy[job.workerPool] = struct{}{}
+			running.Go(func() {
+				if err := e.process(ctx, job); err != nil && ctx.Err() == nil && !errors.Is(err, errLeaseLost) {
+					slog.Warn("advance Job", "runId", job.id, "error", err)
+				}
+				select {
+				case finished <- job.workerPool:
+				case <-ctx.Done():
+				}
+			})
+			continue
 		}
-		if err != nil && ctx.Err() == nil && !errors.Is(err, errLeaseLost) {
-			slog.Warn("advance Job", "runId", job.id, "error", err)
+		if err != nil && ctx.Err() == nil {
+			slog.Warn("claim Job", "error", err)
 		}
-		timer := time.NewTimer(500 * time.Millisecond)
 		select {
 		case <-ctx.Done():
-			timer.Stop()
-		case <-timer.C:
+		case pool := <-finished:
+			delete(busy, pool)
+		case <-tick.C:
 		}
 	}
 	return nil
@@ -96,6 +112,9 @@ func (e Engine) advance(ctx context.Context, job claim) error {
 			return e.Store.expireQueued(ctx, job)
 		}
 		attempt, err = e.Store.startAttempt(ctx, job)
+		if errors.Is(err, errPoolFull) {
+			return e.Store.yield(ctx, job, 0)
+		}
 		job.number = attempt.Number
 	} else {
 		attempt, err = e.Store.activeAttempt(ctx, job)

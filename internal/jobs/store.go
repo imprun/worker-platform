@@ -22,6 +22,9 @@ var schemaSQL string
 //go:embed schema_site_sessions.sql
 var siteSessionSchema string
 
+//go:embed schema_pool_slots.sql
+var poolSlotSchema string
+
 type Store struct {
 	pool       *pgxpool.Pool
 	namespace  string
@@ -62,12 +65,21 @@ func Open(ctx context.Context, dsn, namespace string, siteKey []byte) (*Store, e
 		if _, err := tx.Exec(ctx, "CREATE TABLE IF NOT EXISTS wp_job_migrations (version integer PRIMARY KEY)"); err != nil {
 			return err
 		}
-		added, err := tx.Exec(ctx, "INSERT INTO wp_job_migrations VALUES (2) ON CONFLICT DO NOTHING")
-		if err != nil || added.RowsAffected() == 0 {
-			return err
+		for _, migration := range []struct {
+			version int
+			sql     string
+		}{{2, siteSessionSchema}, {3, poolSlotSchema}} {
+			added, err := tx.Exec(ctx, "INSERT INTO wp_job_migrations VALUES ($1) ON CONFLICT DO NOTHING", migration.version)
+			if err != nil {
+				return err
+			}
+			if added.RowsAffected() == 1 {
+				if _, err := tx.Exec(ctx, migration.sql); err != nil {
+					return err
+				}
+			}
 		}
-		_, err = tx.Exec(ctx, siteSessionSchema)
-		return err
+		return nil
 	})
 	if err != nil {
 		pool.Close()
@@ -237,22 +249,34 @@ func (s *Store) Result(ctx context.Context, id string) (string, json.RawMessage,
 	return state, result, err
 }
 
-func (s *Store) claim(ctx context.Context) (claim, error) {
+func (s *Store) claim(ctx context.Context, busyPools ...string) (claim, error) {
 	var job claim
 	var snapshot []byte
 	err := s.pool.QueryRow(ctx, `
-		WITH candidate AS (
-			SELECT id FROM wp_job_runs WHERE namespace=$1
-				AND (state IN ('QUEUED', 'STARTING', 'RUNNING', 'RELEASING') OR (state='WAITING_AUTH' AND deadline_at<=clock_timestamp()))
-				AND due_at<=clock_timestamp() AND (lease_until IS NULL OR lease_until<=clock_timestamp())
-			ORDER BY due_at, created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
+		WITH occupied AS (
+			SELECT v.worker_pool, count(*) AS slots FROM wp_job_runs r
+			JOIN wp_job_revisions v USING (worker_uid, revision)
+			WHERE r.state IN ('STARTING', 'RUNNING', 'RELEASING') GROUP BY v.worker_pool
+		), candidate AS (
+			SELECT r.id FROM wp_job_runs r
+			JOIN wp_job_revisions v USING (worker_uid, revision)
+			LEFT JOIN wp_job_pool_limits p USING (worker_pool)
+			LEFT JOIN occupied o USING (worker_pool)
+			WHERE r.namespace=$1
+				AND COALESCE(v.worker_pool,'') <> ALL(COALESCE($3::text[], '{}'))
+				AND (r.state IN ('QUEUED', 'STARTING', 'RUNNING', 'RELEASING') OR (r.state='WAITING_AUTH' AND r.deadline_at<=clock_timestamp()))
+				AND r.due_at<=clock_timestamp() AND (r.lease_until IS NULL OR r.lease_until<=clock_timestamp())
+				AND (r.state<>'QUEUED' OR r.deadline_at<=clock_timestamp() OR p.max_slots IS NULL OR COALESCE(o.slots,0)<p.max_slots)
+			ORDER BY r.due_at, r.created_at, r.id FOR UPDATE OF r SKIP LOCKED LIMIT 1
 		), claimed AS (
 			UPDATE wp_job_runs r SET lease_id=gen_random_uuid(), lease_until=clock_timestamp()+make_interval(secs => $2)
 			FROM candidate c WHERE r.id=c.id RETURNING r.*
 		)
-		SELECT c.id::text, c.lease_id::text, c.state, c.attempt_no, c.deadline_at, c.input, COALESCE(c.site_session_id::text,''), v.snapshot
+		SELECT c.id::text, c.lease_id::text, c.state, c.attempt_no, c.deadline_at, c.input, COALESCE(c.site_session_id::text,''),
+			COALESCE(v.worker_pool,''), v.snapshot
 		FROM claimed c JOIN wp_job_revisions v USING (worker_uid, revision)
-	`, s.namespace, leaseLifetime.Seconds()).Scan(&job.id, &job.leaseID, &job.state, &job.number, &job.deadline, &job.input, &job.siteSessionID, &snapshot)
+	`, s.namespace, leaseLifetime.Seconds(), busyPools).Scan(&job.id, &job.leaseID, &job.state, &job.number, &job.deadline, &job.input,
+		&job.siteSessionID, &job.workerPool, &snapshot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return claim{}, nil
 	}

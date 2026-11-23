@@ -6,7 +6,7 @@ Worker Platform은 Kubernetes Gateway API로 워커를 호출하고, ATE 정책�
 
 `worker-controller`는 v1alpha3의 `HTTPWorker`와 `WorkerProfile`을 감시하고 ATE Control API를 직접 호출한다. 앱 패키지 워커는 `HTTPWorker.spec.appPackage`와 `WorkerProfile.spec.runtimeImage`에 각각 OCI digest를 지정한다. 독립 이미지 워커는 `HTTPWorker.spec.image`를 사용한다. `workerctl`은 같은 배포 로직으로 v1alpha2 파일을 처리한다. [CRD 배포 가이드](ate-controller.md) · [Echo 패키지 예제](../examples/echo/README.md#공통-런타임으로-echo-패키지-배포)
 
-옵션으로 활성화하는 단일 Job API는 PostgreSQL에 Run과 리비전을 고정하고, 시도별 ATE Actor의 UID와 최종 결과를 기록한다. 별도 ARM64 gVisor 풀에서 독립 Echo 이미지로 Worker 장애 후 재시도와 세션 만료 후 HITL 재개를 검증했다. 풀별 한도와 운영 대시보드의 인수 기준은 설계 검토에 정리했다. [현재 Job API](job-api.md) · [사이트 세션과 HITL](site-session-reauth.md) · [출시 기준](design-review.md)
+옵션으로 활성화하는 단일 Job API는 PostgreSQL에 Run과 리비전을 고정하고, 시도별 ATE Actor의 UID와 최종 결과를 기록한다. Job 컨트롤러 복제본은 PostgreSQL의 WorkerPool별 슬롯 한도를 공유한다. 별도 ARM64 gVisor 풀에서 Echo로 Worker 장애 후 재시도와 세션 만료 후 HITL 재개를 검증했다. [현재 Job API](job-api.md) · [풀별 슬롯 설정](job-api.md#workerpool별-실행-슬롯) · [사이트 세션과 HITL](site-session-reauth.md)
 
 ## 실행 경로와 책임
 

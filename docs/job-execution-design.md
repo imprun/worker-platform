@@ -63,6 +63,8 @@ stateDiagram-v2
 
 **접수 한도**는 완료되지 않은 Run 수를 세며, 재시도 백오프나 재인증 대기 중에도 Run 하나로 센다. **슬롯 한도**는 컨트롤러가 준비·실행·인증·정리용 Actor를 위해 확보한 예약 수를 센다. 실제 CPU·메모리 적합성은 ATE가 판정한다. 대시보드의 즉시 실행 가능 대기 건수, 백오프 건수와 사용자 응답 대기는 별도 지표다.
 
+현재 단일 Job의 슬롯 한도는 한 ATE 설치의 `WorkerPool` `namespace/name`별로 PostgreSQL에 저장한다. 복제본은 같은 풀 한도 행을 잠가 시도 예약을 직렬화하며, 포화 풀은 조회 단계에서 건너뛴다. 기존 Run의 풀은 고정된 리비전 스냅샷에서 복원한다. [운영 설정과 상태별 점유 기준](job-api.md#workerpool별-실행-슬롯)
+
 - 모든 복제본은 같은 물리 풀 `(ATE 클러스터 ID, WorkerPool UID)`과 워커에 대해 같은 한도 행을 잠근다. 여러 행이 필요한 트랜잭션은 접수 영수증·게시 행, 전역 한도, 풀 한도, 앱 한도, 계정 세션, Run, 시도·인증 요청 순서를 지킨다. 같은 종류에서 여러 키를 잠글 때는 키 순서를 고정한다. 사용량 확인과 예약·반환은 같은 트랜잭션에서 수행한다. [PostgreSQL 잠금 순서](https://www.postgresql.org/docs/18/explicit-locking.html#LOCKING-DEADLOCKS)
 - 전역 슬롯 상한을 설정할 때는 물리 풀별 상한의 합을 전역 상한 이내로 배정한다. 풀 간 몫을 옮길 때는 낮춘 풀의 실제 예약이 새 상한 안으로 돌아온 후 다른 풀에 할당한다. 각 풀이 자신의 플랫폼 예약 몫을 독립적으로 사용할 수 있다.
 - 스케줄러는 풀별로 실행 가능 시각과 접수 순서를 따라 후보를 찾는다. 한도 행을 먼저 잠근 뒤 `FOR UPDATE SKIP LOCKED`로 Run을 선점하고 조건을 다시 검사한다. 한도가 찬 풀이나 앱은 건너뛰고 다른 후보를 처리한다. 실제 가용량이 없어 ATE가 `ResourceExhausted`를 반환하면 회수 후 백오프를 적용한다. 앱 본문을 시작하지 못한 배치는 앱 재시도 횟수 대신 준비 기한에 포함한다. [PostgreSQL 대기열 선점](https://www.postgresql.org/docs/18/sql-select.html#SQL-FOR-UPDATE-SHARE) · [ATE v1.0.0 가용량 오류](https://github.com/agent-substrate/substrate/blob/v1.0.0/cmd/ateapi/internal/controlapi/workflow_resume.go#L425-L435)
