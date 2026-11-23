@@ -126,7 +126,7 @@ fi
 status=$(call_echo -H 'ate-target-actor: wp-echo-example/unassigned-test-name')
 [ "$status" = 200 ] && [ "$(cat "$work/response.json")" = "$payload" ] ||
     fail "Gateway did not overwrite the target header"
-# Preserve the private readiness probe check from the scraping-platform smoke test.
+# The Gateway publishes the invocation endpoint and keeps the readiness probe private.
 status=$(curl --noproxy '*' -sS --max-time 5 -w '%{http_code}' -o /dev/null \
     -H 'Host: echo.example.test' "http://$forwarded_address/readyz")
 [ "$status" = 404 ] || fail "Gateway exposed the private readiness probe"

@@ -3,8 +3,8 @@ ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
-COPY cmd/echo ./cmd/echo
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/echo-worker ./cmd/echo
+COPY examples/echo/standalone ./examples/echo/standalone
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/echo-worker ./examples/echo/standalone
 
 FROM scratch
 COPY --from=build /out/echo-worker /usr/local/bin/echo-worker

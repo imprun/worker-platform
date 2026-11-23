@@ -102,7 +102,7 @@ k delete -f examples/echo/packaged.yaml
 
 ## 개발계 준비
 
-이 절부터는 HTTP 러너와 Echo를 한 이미지에 담은 독립 이미지로 ATE 호출 경로를 검증한다. [독립 이미지 소스](../../cmd/echo/main.go) · [이미지 레시피](../../Dockerfile.echo)
+이 절부터는 HTTP 러너와 Echo를 한 이미지에 담은 독립 검증 서버로 ATE 호출 경로를 확인한다. 서버와 테스트는 `examples/echo/standalone`에 있다. [독립 서버 소스](standalone/main.go) · [이미지 레시피](../../Dockerfile.echo)
 
 - Kubernetes에 ATE와 ARM64 gVisor 환경, Gateway API CRD와 agentgateway가 설치되어 있어야 한다. 예제 GatewayClass 이름은 `agentgateway`이고 데이터 플레인 Service는 `ClusterIP`다. 시험 조합은 Kubernetes v1.36.6, Gateway API v1.6.1, agentgateway v1.7.0, ATE v1.0.0이다. [ATE 설치](https://ate.dev/docs/guides/operator-install/) · [agentgateway 설치](https://agentgateway.dev/docs/kubernetes/latest/documentation/install/helm/)
 - Atespace를 만들 수 있는 운영자 계정과 `kubectl ate`를 준비한다. ATE Control과 Router의 서버 CA, Router에서 허가한 클라이언트 인증서와 키가 필요하다. 검증 스크립트는 POSIX 셸, `kubectl`, Go, `curl`을 사용한다. 새 이미지를 빌드하고 게시할 때는 Docker Buildx와 `jq`가 추가로 필요하다. [ATE 인증](https://ate.dev/docs/guides/authentication/) · [Gateway에서 백엔드 mTLS 설정](https://gateway-api.sigs.k8s.io/guides/user-guides/tls/)

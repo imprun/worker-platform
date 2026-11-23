@@ -17,7 +17,7 @@ Echo는 공통 런타임 위에서 JSON을 처리하는 앱 패키지 예제입�
 | [요구사항](docs/requirements.md) | 운영 범위 및 기능별 인수 기준 |
 | [단일 Job 실행 상세 설계](docs/job-execution-design.md) | API, 시도와 슬롯, 재시도, 사이트 세션과 운영 화면 |
 | [설계 검토와 검증 근거](docs/design-review.md) | 검토 결과, kagent·Testkube 소스, 출시 시험 |
-| [테스트 기준과 PoC 검증](docs/testing.md) | PostgreSQL 회귀 테스트와 ATE 실환경 검증 실행 기준 |
+| [테스트 기준과 검증 기록](docs/testing.md) | PostgreSQL 회귀 테스트와 ATE 실환경 검증 실행 기준 |
 | [ATE 직접 배포](docs/ate-deployment.md) | 전용 풀과 Gateway 설정, CLI 배포, 실제 호출 검증 |
 
 <a name="try-it-locally"></a>
@@ -27,7 +27,7 @@ Echo는 공통 런타임 위에서 JSON을 처리하는 앱 패키지 예제입�
 `go.mod`에 지정한 버전 이상의 Go를 설치하고 이 저장소를 내려받습니다. 첫 터미널에서 Echo를 실행합니다.
 
 ```sh
-go run ./cmd/echo -listen 127.0.0.1:8080
+go run ./examples/echo/standalone -listen 127.0.0.1:8080
 ```
 
 다른 터미널에서 Echo를 호출하고 배포 객체를 출력합니다.

@@ -33,7 +33,7 @@ jobs:
           go-version-file: go.mod
       - name: Check formatting
         run: |
-          files=$(gofmt -l cmd internal examples/echo/app)
+          files=$(gofmt -l cmd internal examples/echo)
           if [ -n "$files" ]; then
             printf '%s\n' "$files"
             exit 1

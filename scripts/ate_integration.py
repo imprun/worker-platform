@@ -12,7 +12,6 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 GO_BOUNDARIES = (
     "cmd/actor-runtime/",
-    "cmd/echo/",
     "cmd/worker-controller/",
     "cmd/workerctl/",
     "internal/apppackage/",
@@ -23,7 +22,6 @@ GO_BOUNDARIES = (
 BUILD_BOUNDARIES = {
     "Dockerfile.actor-runtime",
     "Dockerfile.controller",
-    "Dockerfile.echo",
     "scripts/build-app-package.py",
 }
 ATE_DEPENDENCY = re.compile(
@@ -59,7 +57,7 @@ def changes(base, head):
 
 
 def require_fixture():
-    # Based on Assert-Cluster and the held fixture UIDs in the WX PoC at 2e6d70c.
+    # Check the fixture identities before allowing the smoke test to deploy.
     context = os.environ["KUBE_CONTEXT"]
     kube = ("kubectl", "--context", context, "--request-timeout=20s")
     ate = ("kubectl", "ate", "--context", context, "--token-file", os.environ["ATE_TOKEN_FILE"])

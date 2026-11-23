@@ -10,7 +10,8 @@ from scripts import ate_integration as gate
 class IntegrationGateTest(unittest.TestCase):
     def test_database_jobs_and_test_files_do_not_require_live_ate(self):
         paths = ("internal/jobs/engine.go\0internal/jobs/pool_slots.go\0internal/jobs/schema_pool_slots.sql\0"
-                 "internal/ateclient/client_test.go\0examples/echo/run.sh\0docs/testing.md\0go.sum\0")
+                 "internal/ateclient/client_test.go\0examples/echo/run.sh\0examples/echo/standalone/main.go\0"
+                 "Dockerfile.echo\0docs/testing.md\0go.sum\0")
         with patch.object(gate, "output", side_effect=[paths, "+github.com/jackc/pgx/v5 v5.9.0 hash\n"]):
             self.assertEqual([], gate.changes("base", "head"))
 

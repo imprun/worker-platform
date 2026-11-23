@@ -1,4 +1,4 @@
-# 테스트 기준과 PoC 검증 재사용
+# 테스트 기준과 검증 기록
 
 ## PostgreSQL 회귀 테스트
 
@@ -11,17 +11,21 @@ WORKER_JOB_TEST_DSN='postgresql://jobs:jobs@127.0.0.1:5432/jobs?sslmode=disable'
   go test -race -count=1 -run '^TestPostgres' -v ./internal/jobs
 ```
 
-## 이전 PoC 검증 증거
+## Worker Platform에서 확인한 동작
 
-| 검증한 동작 | 이어서 사용하는 증거와 스크립트 |
+| 검증한 동작 | 재현 방법과 관찰 결과 |
 | --- | --- |
-| 복제본 간 공유 슬롯과 포화 풀 격리 | WX의 두 저장소 연결이 동일한 PostgreSQL에서 한도를 다투는 회귀 테스트를 기준으로 삼는다. Worker Platform CI에서 현재 저장소의 예약과 이관을 검증한다. [WX 풀 한도 테스트](https://github.com/imprun/imprun-cloud/blob/3f2b20131fe325c09c391b6f8661f576e74f13f3/runtime/internal/executor/postgres/pool_slots_test.go) |
-| ARM64 gVisor에서 Worker 손실 후 새 Actor로 재시도 | 기존 실증의 같은 실행 ID, 결과 한 건, Actor·슬롯 반환 기록을 사용한다. 재검증 진입점은 검증된 `verify_wx_failover.ps1` 커밋에 남아 있다. Worker Platform의 연동 스모크는 이 스크립트의 클러스터·시험 리소스 UID 대조를 적용한다. [실증 기록](https://github.com/imprun/imprun-cloud/blob/2e6d70c1466b6cd791af197038283da88fd5cc6e/docs/wx/deploy-operations.md) · [PoC 검증 스크립트](https://github.com/imprun/imprun-cloud/blob/2e6d70c1466b6cd791af197038283da88fd5cc6e/deploy/ax/verify_wx_failover.ps1) |
-| OCI 패키지 전환, Ready 조건과 기존 Actor 롤백 | 동일 런타임으로 패키지 digest를 바꾼 실증을 기준으로 삼는다. PoC 스모크의 대상 헤더 덮어쓰기와 공개 `/readyz` 차단 검사를 현재 Echo 스모크에서 실행한다. [PoC 배포 가이드](https://github.com/imprun/scraping-platform/blob/defe5211b91e67c315c1acbee76e01f7a0f01d59/deploy/dev/README.md#oci-앱-패키지) · [PoC 스모크](https://github.com/imprun/scraping-platform/blob/defe5211b91e67c315c1acbee76e01f7a0f01d59/test/smoke.ps1) · [Echo 스모크](../examples/echo/run.sh) |
+| Gateway에서 ATE Router로 mTLS 연결 | 독립 Echo 예제를 배포해 Gateway에서 HTTP 200과 Echo JSON을 확인했다. 같은 명세를 재적용했을 때 Actor UID가 유지됐다. [실행 스크립트](../examples/echo/run.sh) · [ATE 직접 배포 검증](ate-deployment.md#개발계-검증-기록) |
+| OCI 패키지 전환과 롤백 | 런타임 이미지 digest를 고정한 상태에서 앱 v1 → v2 → v1을 적용했다. v2 준비 중 v1 응답을 확인했고, 롤백 시 기존 v1 Actor UID와 같은 HTTPRoute UID를 확인했다. [배포 절차](../examples/echo/README.md#공통-런타임으로-echo-패키지-배포) · [실측 기록](../examples/echo/README.md#공통-런타임과-echo-앱-패키지) |
+| Worker 손실 후 단일 Job 복구 | 실행 중 v2를 배포한 뒤 시험 Worker를 종료했다. 다른 Worker의 새 Actor가 같은 Run ID의 v1 리비전을 실행했다. 결과는 한 건이었으며 완료 후 Job Actor와 슬롯은 0개였다. [장애 재현 절차](job-api.md#개발계에서-켜기) · [실측 기록](job-api.md#공통-런타임과-echo-앱-패키지) |
+| HITL 대기 후 재개 | 재인증 대기 중 Job Actor와 슬롯이 0개였다. 패키지 v2 배포와 모의 재인증을 거친 뒤에도 새 Actor가 같은 Run ID로 v1 결과 한 건을 기록했다. [재인증 실행 절차](site-session-reauth.md#만료와-모의-재인증-호출) · [실측 기록](site-session-reauth.md#공통-런타임과-echo-앱-패키지) |
+| 복제본 간 슬롯 경합과 포화 격리 | PostgreSQL CI가 마지막 슬롯 예약 경합과 데이터 이관을 확인한다. 두 전용 ARM64 gVisor 풀에서 A의 슬롯이 모두 찬 동안 B의 Job이 완료됐다. [CI 테스트](../internal/jobs/pool_slots_test.go) · [실측 기록](job-api.md#풀-두-개와-복제본-두-개-검증) |
+
+새 검증 결과는 해당 기능의 가이드에 남긴다. 재현에 필요한 커밋, 설치 버전, 명령과 관찰한 Run ID·Actor UID·슬롯 수를 확인 가능한 범위에서 기록한다. 반복 재현이 필요한 동작에는 이 저장소에 픽스처와 테스트를 추가한다.
 
 ## ATE 실환경 테스트
 
-변경 감지는 ATE Control·Router 클라이언트, 배포 컨트롤러, 템플릿·WorkerPool·Gateway 설정, 런타임 이미지·OCI 패키징, 해당 연동의 Go 도구와 SDK 의존성을 본다. Job 예약·스키마와 문서·테스트 수정은 기본 CI에서 검사한다. 변경 기준은 실제 배포할 후보 커밋과 비교할 기준 커밋이다. [변경 판정 코드](../scripts/ate_integration.py)
+변경 감지는 ATE Control·Router 클라이언트, 배포 컨트롤러, 템플릿·WorkerPool·Gateway 설정, 공통 런타임 이미지·OCI 패키징, 해당 연동의 Go 도구와 SDK 의존성을 본다. Job 예약·스키마, 독립 Echo 검증 서버, 문서·테스트 수정은 기본 CI에서 검사한다. 변경 기준은 실제 배포할 후보 커밋과 비교할 기준 커밋이다. [변경 판정 코드](../scripts/ate_integration.py)
 
 ```sh
 python3 scripts/ate_integration.py "$base" HEAD
@@ -35,4 +39,4 @@ python3 scripts/ate_integration.py "$base" HEAD
 python3 scripts/ate_integration.py --run "$base" HEAD
 ```
 
-이 진입점은 실제 ATE에 독립 Echo Actor를 배포하고 Gateway 경유 응답·대상 헤더 덮어쓰기·공개 준비 경로 차단을 확인한다. 실험이 끝나면 전용 환경의 소유자가 예제의 정리 절차를 사용한다. OCI 로딩 계약이나 Worker 장애 처리의 연동이 바뀌면 앞 표의 검증을 해당 변경에 맞춰 재실행한다. [Echo 실험 정리](../examples/echo/README.md#예제-정리)
+이 진입점은 실제 ATE에 독립 Echo Actor를 배포하고 Gateway 경유 응답·대상 헤더 덮어쓰기·공개 준비 경로 차단을 확인한다. 실험이 끝나면 전용 환경의 소유자가 예제의 정리 절차를 사용한다. OCI 로딩 계약이나 Worker 장애 처리의 연동이 바뀌면 앞 표의 실행 절차에서 해당 경로를 검증한다. [Echo 실험 정리](../examples/echo/README.md#예제-정리)
