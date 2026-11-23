@@ -23,7 +23,7 @@ func TestAttemptRequiresInput(t *testing.T) {
 	}
 }
 
-func TestAttemptInvokesEchoWithRunAndAttempt(t *testing.T) {
+func TestAttemptInvokesEcho(t *testing.T) {
 	dir := t.TempDir()
 	entrypoint := filepath.Join(dir, "echo-app.exe")
 	build := exec.CommandContext(t.Context(), "go", "build", "-trimpath", "-o", entrypoint, "../../examples/echo/app")
@@ -31,16 +31,42 @@ func TestAttemptInvokesEchoWithRunAndAttempt(t *testing.T) {
 		t.Fatalf("build Echo app: %v\n%s", err, output)
 	}
 	handler := appRunner{apppackage.Installed{Dir: dir, Entrypoint: entrypoint}}.routes()
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	// The delay in the input is for the first Attempt. A retry must immediately process the same input.
-	w := httptest.NewRecorder()
-	r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/attempt",
-		strings.NewReader(`{"runId":"echo-run","attempt":2,"input":{"message":"hello","waitSeconds":75}}`))
-	handler.ServeHTTP(w, r)
-	const want = `{"message":"hello","version":"v1","runId":"echo-run","attempt":2}`
-	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != want {
-		t.Fatalf("unexpected Echo retry: HTTP %d, response %s", w.Code, w.Body.String())
+	tests := []struct {
+		name    string
+		request string
+		status  int
+		body    string
+	}{
+		{
+			name:    "retry skips first attempt delay",
+			request: `{"runId":"echo-run","attempt":2,"input":{"message":"hello","waitSeconds":75}}`,
+			status:  http.StatusOK,
+			body:    `{"message":"hello","version":"v1","runId":"echo-run","attempt":2}`,
+		},
+		{
+			name:    "expired site session",
+			request: `{"runId":"echo-run","attempt":1,"input":{"message":"hello"},"siteSession":{"ref":"demo-account","version":1,"state":{"mockCookie":"expired-for-echo"}}}`,
+			status:  http.StatusPreconditionRequired,
+			body:    `{"code":"site_session_expired"}`,
+		},
+		{
+			name:    "renewed site session",
+			request: `{"runId":"echo-run","attempt":2,"input":{"message":"hello"},"siteSession":{"ref":"demo-account","version":2,"state":{"mockCookie":"approved-for-echo"}}}`,
+			status:  http.StatusOK,
+			body:    `{"message":"hello","version":"v1","runId":"echo-run","attempt":2,"siteSessionVersion":2}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			w := httptest.NewRecorder()
+			r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/attempt", strings.NewReader(tt.request))
+			handler.ServeHTTP(w, r)
+			if w.Code != tt.status || strings.TrimSpace(w.Body.String()) != tt.body {
+				t.Fatalf("unexpected Echo response: HTTP %d, body %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }
 

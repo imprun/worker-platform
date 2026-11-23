@@ -23,8 +23,8 @@
 | CRD 배포 컨트롤러 | v1alpha3 워커와 프로필을 적용해 동기 HTTP 배포를 검증했다. 후보 준비 중 기존 Gateway 응답이 유지됐고, 롤백 후 기존 Actor UID와 HTTPRoute UID를 확인했다. [컨트롤러 실증](ate-controller.md#개발계-검증) |
 | 공통 런타임과 Echo 앱 패키지 | ARM64 gVisor 풀에서 런타임 digest를 고정하고 앱 digest만 v1 → v2 → v1으로 바꿨다. 새 Actor가 준비된 뒤 같은 URL에서 응답이 전환됐고 롤백은 기존 v1 Actor를 사용했다. Go 테스트에서 Job 리비전에도 두 digest가 고정되는지 확인했다. [Echo 배포 검증](../examples/echo/README.md#공통-런타임과-echo-앱-패키지) · [Job 리비전 테스트](../internal/platform/packaged_test.go) |
 | 단일 Job 구현 | PostgreSQL 접수와 리비전 고정, Attempt Actor UID 기록, Worker 장애 후 새 Actor 재시도를 검증했다. 공통 런타임의 Echo 패키지를 v2로 전환한 뒤에도 기존 Run은 처음 접수한 v1 결과 한 건을 반환했다. [패키지 Job 개발계 검증](job-api.md#공통-런타임과-echo-앱-패키지) |
-| 사이트 세션과 HITL 구현 | Actor·슬롯을 반환한 뒤 재인증을 기다리고, 중복 완료가 들어와도 같은 Run ID와 리비전으로 새 Actor에서 결과 한 건을 얻었다. [개발계 실증](site-session-reauth.md#arm64-gvisor-검증) |
-| 첫 운영 릴리스 | 공통 런타임의 HITL 재개, 풀별 한도, 운영 대시보드는 아래 인수 기준으로 검증한다. |
+| 사이트 세션과 HITL 구현 | 재인증 대기 중 Actor·슬롯을 반환했다. 공통 런타임에서 Echo 패키지를 v2로 바꾼 뒤에도 같은 Run ID가 새 Actor에서 v1으로 재개돼 결과 한 건을 반환했다. [패키지 HITL 개발계 검증](site-session-reauth.md#공통-런타임과-echo-앱-패키지) |
+| 첫 운영 릴리스 | 풀별 한도와 운영 대시보드는 아래 인수 기준으로 검증한다. |
 
 ## 출시 인수 시험
 

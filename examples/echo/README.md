@@ -91,6 +91,8 @@ call_echo
 
 같은 OCI 패키지로 단일 Job을 접수할 수 있다. Echo는 Job 결과에 `runId`와 `attempt`를 돌려준다. Worker 장애 재현용 입력 `waitSeconds`는 첫 Attempt만 최대 75초 대기시킨다. [Echo Job 설정과 재시도 검증](../../docs/job-api.md)
 
+사이트 세션을 연결하면 Echo는 만료된 모의 쿠키에 재인증을 요청한다. 갱신 후에는 새 Actor에서 처리에 사용한 `siteSessionVersion`을 결과에 포함한다. [HITL 재인증과 v1 리비전 재개](../../docs/site-session-reauth.md)
+
 시험을 마치면 포트포워드를 종료하고 아래 명령으로 컨트롤러를 중단한 뒤 소유한 배포 선언을 제거한다. 이어 예제 Atespace의 Actor와 ActorTemplate을 정리한다. [예제 리소스 정리 순서](#예제-정리)
 
 ```sh
