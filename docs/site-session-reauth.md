@@ -1,6 +1,6 @@
 # 사이트 세션과 HITL 재인증
 
-Job 접수 요청의 `Site-Session-Ref`에 운영자가 등록한 사이트 계정 참조를 지정한다. `worker-controller`는 네임스페이스와 HTTPWorker UID에 속하는 세션을 찾아 Run에 연결한다. PostgreSQL에는 로그인 상태를 AES-256-GCM 암호문으로 저장한다. Controller는 실행할 Attempt에만 mTLS로 로그인 상태를 전달하며 상태 조회에는 세션 버전이 표시된다. 같은 DB를 쓰는 컨트롤러는 동일한 키 Secret을 사용한다. [Job API](job-api.md) · [세션 저장소](../internal/jobs/site_sessions.go)
+Job 접수 요청의 `Site-Session-Ref`에 운영자가 등록한 사이트 계정 참조를 지정한다. Run API는 네임스페이스와 HTTPWorker UID에 속하는 세션을 찾아 Run에 연결한다. PostgreSQL에는 로그인 상태를 AES-256-GCM 암호문으로 저장한다. 컨트롤러는 실행할 Attempt에만 mTLS로 로그인 상태를 전달하며 상태 조회에는 세션 버전이 표시된다. 같은 DB를 쓰는 Run API와 컨트롤러는 동일한 키 Secret을 사용한다. [Job API](job-api.md) · [세션 저장소](../internal/jobs/site_sessions.go)
 
 ```mermaid
 stateDiagram-v2
@@ -23,7 +23,7 @@ stateDiagram-v2
 
 ## 개발계 설정
 
-Job 개발계의 PostgreSQL, ATE Router mTLS, Job 토큰 및 Gateway를 준비한다. `SITE_KEY_FILE`에는 무작위 32바이트를 base64로 인코딩한 값을, `REAUTH_TOKEN_FILE`에는 Job 토큰과 구분된 32자 이상의 무작위 인증 제공자 토큰을 둔다. `CONTROLLER_IMAGE`에는 이 버전의 컨트롤러 이미지 digest를 사용한다. [Job 개발계 가이드](job-api.md#개발계에서-켜기)
+Job 개발계의 PostgreSQL, ATE Router mTLS, Job 토큰 및 Gateway를 준비한다. `SITE_KEY_FILE`에는 무작위 32바이트를 base64로 인코딩한 값을, `REAUTH_TOKEN_FILE`에는 Job 토큰과 구분된 32자 이상의 무작위 인증 제공자 토큰을 둔다. `CONTROLLER_IMAGE`와 `RUN_API_IMAGE`에는 이 버전의 이미지 digest를 사용한다. [Job 개발계 가이드](job-api.md#개발계에서-켜기)
 
 ```sh
 k -n "$ns" create secret generic worker-job-site-sessions \
@@ -37,6 +37,11 @@ sed '/-router-url=/c\
   k set image --local -f - controller="$CONTROLLER_IMAGE" -o yaml |
   k -n "$ns" apply -f -
 k -n "$ns" rollout status deployment/worker-controller --timeout=90s
+k patch --local -f deploy/run-api/deployment.yaml --type=json \
+  --patch-file examples/echo/site-sessions-run-api-patch.yaml -o yaml |
+  k set image --local -f - api="$RUN_API_IMAGE" -o yaml |
+  k -n "$ns" apply -f -
+k -n "$ns" rollout status deployment/run-api --timeout=90s
 ```
 
 Job 개발계 가이드의 `apply_job_package "$package_v1"`과 `wait_job_revision`으로 Echo 앱 v1을 게시한다. 이 명세는 공통 런타임 이미지와 OCI 앱 패키지를 지정하고 `spec.jobEnabled`를 켠다. Gateway는 로컬 8080번에, 인증 제공자 접속은 별도 터미널의 `k -n "$ns" port-forward svc/worker-jobs 8084:80`으로 연결한다. 예제 Gateway에 게시하는 Job 경로는 `/v1`이다. [Echo 패키지 빌드와 배포](job-api.md#개발계에서-켜기) · [Gateway 정의](../examples/echo/jobs-gateway.yaml)

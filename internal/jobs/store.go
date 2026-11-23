@@ -5,9 +5,12 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/imprun/worker-platform/internal/platform"
@@ -25,10 +28,32 @@ var siteSessionSchema string
 //go:embed schema_pool_slots.sql
 var poolSlotSchema string
 
+//go:embed schema_publications.sql
+var publicationSchema string
+
 type Store struct {
 	pool       *pgxpool.Pool
 	namespace  string
 	siteCipher cipher.AEAD
+}
+
+func OpenFiles(ctx context.Context, namespace, dsnFile, siteKeyFile string) (*Store, error) {
+	dsn, err := os.ReadFile(dsnFile)
+	if err != nil || strings.TrimSpace(string(dsn)) == "" {
+		return nil, errors.New("read nonempty Job PostgreSQL DSN file")
+	}
+	var siteKey []byte
+	if siteKeyFile != "" {
+		encoded, err := os.ReadFile(siteKeyFile)
+		if err != nil {
+			return nil, errors.New("read site session key file")
+		}
+		siteKey, err = base64.StdEncoding.DecodeString(strings.TrimSpace(string(encoded)))
+		if err != nil || len(siteKey) != 32 {
+			return nil, errors.New("site session key must encode 32 bytes in base64")
+		}
+	}
+	return Open(ctx, strings.TrimSpace(string(dsn)), namespace, siteKey)
 }
 
 func Open(ctx context.Context, dsn, namespace string, siteKey []byte) (*Store, error) {
@@ -68,7 +93,7 @@ func Open(ctx context.Context, dsn, namespace string, siteKey []byte) (*Store, e
 		for _, migration := range []struct {
 			version int
 			sql     string
-		}{{2, siteSessionSchema}, {3, poolSlotSchema}} {
+		}{{2, siteSessionSchema}, {3, poolSlotSchema}, {4, publicationSchema}} {
 			added, err := tx.Exec(ctx, "INSERT INTO wp_job_migrations VALUES ($1) ON CONFLICT DO NOTHING", migration.version)
 			if err != nil {
 				return err
@@ -90,30 +115,30 @@ func Open(ctx context.Context, dsn, namespace string, siteKey []byte) (*Store, e
 
 func (s *Store) Close() { s.pool.Close() }
 
-func (s *Store) RecordRevision(ctx context.Context, workerUID, revision string, snapshot platform.JobRevision) error {
+func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
+
+func recordRevision(ctx context.Context, tx pgx.Tx, workerUID, revision string, snapshot platform.JobRevision) error {
 	cfg, err := json.Marshal(snapshot)
 	if err != nil {
 		return err
 	}
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 			INSERT INTO wp_job_revisions (worker_uid, revision, snapshot) VALUES ($1, $2, $3::jsonb)
 			ON CONFLICT (worker_uid, revision) DO NOTHING
-		`, workerUID, revision, cfg); err != nil {
-			return err
-		}
-		var uid string
-		err := tx.QueryRow(ctx, `
+	`, workerUID, revision, cfg); err != nil {
+		return err
+	}
+	var uid string
+	err = tx.QueryRow(ctx, `
 			SELECT snapshot->>'templateUID' FROM wp_job_revisions WHERE worker_uid=$1 AND revision=$2
-		`, workerUID, revision).Scan(&uid)
-		if err != nil {
-			return err
-		}
-		if uid != snapshot.TemplateUID {
-			return errors.New("published Job revision has a different ActorTemplate UID")
-		}
-		return nil
-	})
+	`, workerUID, revision).Scan(&uid)
+	if err != nil {
+		return err
+	}
+	if uid != snapshot.TemplateUID {
+		return errors.New("published Job revision has a different ActorTemplate UID")
+	}
+	return nil
 }
 
 func scanRun(row pgx.Row, result *Run, extra ...any) error {
@@ -129,9 +154,19 @@ func scanAttempt(row pgx.Row, attempt *Attempt) error {
 		&attempt.WorkerID, &attempt.WorkerPodUID, &attempt.Reason, &attempt.CreatedAt, &attempt.SiteSessionVersion)
 }
 
-func (s *Store) Admit(ctx context.Context, worker string, publication Publication, key string, input json.RawMessage, sessionRef string) (Run, error) {
+func (s *Store) Admit(ctx context.Context, worker, key string, input json.RawMessage, sessionRef string) (Run, error) {
 	var run Run
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var workerUID, revision string
+		err := tx.QueryRow(ctx, `SELECT worker_uid, COALESCE(revision, '') FROM wp_job_publications
+			WHERE namespace=$1 AND worker=$2 AND enabled FOR SHARE`, s.namespace, worker).
+			Scan(&workerUID, &revision)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
 		replay := func() (bool, error) {
 			var same bool
 			err := scanRun(tx.QueryRow(ctx, `
@@ -139,7 +174,7 @@ func (s *Store) Admit(ctx context.Context, worker string, publication Publicatio
 					((SELECT ref FROM wp_job_site_sessions WHERE id=r.site_session_id) IS NOT DISTINCT FROM NULLIF($5,''))
 				FROM wp_job_runs r
 				WHERE namespace=$1 AND worker_uid=$2 AND idempotency_key=$3
-			`, s.namespace, publication.WorkerUID, key, input, sessionRef), &run, &same)
+			`, s.namespace, workerUID, key, input, sessionRef), &run, &same)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return false, nil
 			}
@@ -151,7 +186,7 @@ func (s *Store) Admit(ctx context.Context, worker string, publication Publicatio
 		if found, err := replay(); found || err != nil {
 			return err
 		}
-		if publication.Revision == "" {
+		if revision == "" {
 			return ErrNotPublished
 		}
 		var siteSessionID string
@@ -160,7 +195,7 @@ func (s *Store) Admit(ctx context.Context, worker string, publication Publicatio
 				return ErrAuthDisabled
 			}
 			err := tx.QueryRow(ctx, `SELECT id::text FROM wp_job_site_sessions WHERE namespace=$1 AND worker_uid=$2 AND ref=$3`,
-				s.namespace, publication.WorkerUID, sessionRef).Scan(&siteSessionID)
+				s.namespace, workerUID, sessionRef).Scan(&siteSessionID)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}
@@ -168,12 +203,12 @@ func (s *Store) Admit(ctx context.Context, worker string, publication Publicatio
 				return err
 			}
 		}
-		err := scanRun(tx.QueryRow(ctx, `
+		err = scanRun(tx.QueryRow(ctx, `
 			INSERT INTO wp_job_runs (namespace, worker, worker_uid, revision, idempotency_key, input, deadline_at, site_session_id)
 			SELECT $1, $2, worker_uid, revision, $5, $6::jsonb, clock_timestamp()+make_interval(secs => $7), NULLIF($8,'')::uuid
 			FROM wp_job_revisions WHERE worker_uid=$3 AND revision=$4
 			ON CONFLICT (worker_uid, idempotency_key) DO NOTHING
-			RETURNING `+runFields, s.namespace, worker, publication.WorkerUID, publication.Revision, key, input, runLifetime.Seconds(), siteSessionID), &run)
+			RETURNING `+runFields, s.namespace, worker, workerUID, revision, key, input, runLifetime.Seconds(), siteSessionID), &run)
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}

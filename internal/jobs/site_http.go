@@ -17,12 +17,12 @@ func (api httpAPI) createSiteSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	publication, err := api.resolve(r.Context(), worker)
+	uid, err := api.store.publishedWorkerUID(r.Context(), worker)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	receipt, err := api.store.CreateSiteSession(r.Context(), publication.WorkerUID, ref, update)
+	receipt, err := api.store.CreateSiteSession(r.Context(), uid, ref, update)
 	if err != nil {
 		writeError(w, err)
 		return

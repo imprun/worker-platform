@@ -89,8 +89,12 @@ func TestPostgresPoolMigrationPreservesExistingRuns(t *testing.T) {
 	if _, err := store.pool.Exec(ctx, "INSERT INTO wp_job_pool_limits VALUES ($1, 1)", pool); err != nil {
 		t.Fatal(err)
 	}
-	pub := Publication{WorkerUID: "legacy-worker-uid", Revision: "v1"}
-	queuedRun, err := store.Admit(ctx, "echo", pub, "queued-after-upgrade", json.RawMessage(`{}`), "")
+	observeJob(t, ctx, store, "echo", "legacy-worker-uid", "v1", true)
+	replay, err := store.Admit(ctx, "echo", "complete", json.RawMessage(`{}`), "")
+	if err != nil || replay.ID != completedID || replay.Revision != "v1" {
+		t.Fatalf("receipt changed after migration: %+v %v", replay, err)
+	}
+	queuedRun, err := store.Admit(ctx, "echo", "queued-after-upgrade", json.RawMessage(`{}`), "")
 	if err != nil {
 		t.Fatal(err)
 	}

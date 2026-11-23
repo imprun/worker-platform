@@ -14,7 +14,7 @@ Worker Platform은 Kubernetes Gateway API로 워커를 호출하고, ATE 정책�
 flowchart LR
     Caller["호출자"] --> GW["Kubernetes Gateway"]
     GW -->|동기 호출| Router["ATE Router"]
-    GW -->|Job 접수와 조회| API["Worker Platform Job API"]
+    GW -->|Job 접수와 조회| API["run-api"]
     API <--> DB[("PostgreSQL")]
     Controller["배포와 실행 컨트롤러"] <--> DB
     Controller -->|ATE API| ATE["ATE 배정과 수명주기"]
@@ -23,8 +23,6 @@ flowchart LR
     Router --> Attempt["Job 시도 Actor"]
     ATE -.-> Serving
     ATE -.-> Attempt
-    Attempt -->|선점, heartbeat, 완료 보고| Internal["내부 실행 API와 계정 세션"]
-    Internal <--> DB
     Controller -->|HTTPRoute 게시| GW
 ```
 
@@ -37,7 +35,7 @@ flowchart LR
 | 공통 Actor 런타임 | 고정된 앱 패키지를 검증하고 로드한다. 준비 확인과 호출 프로토콜을 제공하며 입력·세션을 앱에 전달하고 결과 또는 분류된 실패를 보고한다. |
 | 워커 앱 패키지 | 작업 진입점과 필요한 의존성을 담는다. 앱은 입력으로 작업을 수행하고 결과를 반환하며, 재인증 이후 이어갈 지점과 외부 작업의 멱등 동작을 정의한다. |
 
-Worker Platform은 처음에 Go 서비스 하나로 배포한다. 공개 Job API와 내부 실행 API는 별도 리스너와 Service를 사용한다. 조정 루프와 모든 복제본은 하나의 PostgreSQL을 공유한다. 앱마다 Actor는 달라져도 Job URL은 같은 Job API를 가리킨다. 컨트롤러를 재시작해도 이미 게시된 동기 호출은 Gateway에서 Router로 전달된다. [단일 Job 실행 상세 설계](job-execution-design.md)
+Job을 활성화한 네임스페이스에는 `worker-controller`와 독립적으로 확장할 수 있는 `run-api`를 배포한다. 컨트롤러가 앱 리비전을 게시하고 큐를 소비한다. Run API는 PostgreSQL에서 접수와 조회를 처리하며, 모든 복제본은 같은 DB를 공유한다. Gateway는 앱의 동기 경로를 Router로, 공용 `/v1` 경로를 Run API Service로 연결한다. [배포와 전환 절차](job-api.md#개발계에서-켜기) · [단일 Job 실행 상세 설계](job-execution-design.md)
 
 kagent에서 검증한 리비전·Actor 관리 패턴은 공개 ATE API로 구현한다. Testkube는 개발계 인수 시험의 선택 실행기로 활용한다. [상위 프로젝트 소스 검토](design-review.md)
 
@@ -47,6 +45,18 @@ kagent에서 검증한 리비전·Actor 관리 패턴은 공개 ATE API로 구�
 - 운영자가 관리하는 `WorkerProfile`은 승인된 공통 런타임 이미지와 실행 설정을 선택한다. 실행 설정에는 환경, Atespace, 물리 WorkerPool, 샌드박스 클래스, CPU 아키텍처, Actor의 CPU·메모리, 허용 목적지와 시크릿 참조가 포함된다. Job 접수·동시 실행 한도, 기한·보존 정책도 운영자가 정한다. 앱 팀은 자신에게 승인된 프로필을 참조한다.
 - **리비전**은 워커 UID, 해석한 런타임 이미지와 앱 패키지의 digest 참조, 입력·결과 스키마, 러너 계약 버전과 유효 실행 설정을 정규화해 식별한다. ATE 템플릿의 참조·UID·불변 설정 digest를 함께 보관한다. 호스트·라우트 변경과 실시간 용량 한도는 배포 설정으로 관리한다.
 - **Job**은 호출자가 제출한 단일 작업이다. **Run**은 실행 ID를 가진 접수 기록이고 **Attempt**는 그 실행을 처리하는 개별 시도다. **WorkerPool**은 실행 용량을 관리한다. **Worker**는 그 풀의 실행 Pod이며 **Actor**는 Worker 위에서 앱의 서비스를 제공하거나 Attempt를 처리하는 격리된 실행 인스턴스다.
+
+### Echo 배포와 API 게시
+
+kagent의 `Agent`는 인라인 또는 참조로 지정한 `AgentTemplate`을 `Harness`와 결합한다. Echo도 앱 정의와 실행 정책을 하나의 배포 명세에서 결합한다. [kagent 구성과 리비전 생성](https://github.com/kagent-dev/kagent/blob/558e3d761d8ed2b0d23bfef1867a9d1915210121/docs/architecture/configuration-and-compilation.md)
+
+| 역할 | Echo의 구성 |
+| --- | --- |
+| 앱 정의 | `HTTPWorker.spec.appPackage`에 Echo OCI 패키지 digest를 지정한다. 패키지는 공통 런타임이 호출할 앱과 진입점을 담는다. |
+| 실행 프로필 | `WorkerProfile`이 공통 런타임과 Atespace, WorkerPool, 샌드박스, CPU·메모리, egress를 지정한다. 운영자가 승인한 프로필을 앱이 참조한다. |
+| 배포 | `HTTPWorker`의 이름을 `echo`로 정하고 `spec.profile`로 실행 프로필을 고른다. `spec.trigger`는 동기 호출 주소를, `spec.jobEnabled`는 Job 접수 여부를 지정한다. |
+
+컨트롤러는 이 조합으로 ATE ActorTemplate과 서비스 Actor를 준비한다. Actor가 Ready가 되면 Gateway에 `POST /invoke` 라우트를 반영한다. Job API를 설치한 환경에서 `jobEnabled: true`를 지정하면 컨트롤러가 같은 리비전을 PostgreSQL에 게시한 뒤 `status.active`를 갱신한다. 공용 `POST /v1/workers/echo/runs`는 DB의 활성 리비전을 신규 Run에 고정한다. Job API와 공용 `/v1` 라우트는 플랫폼을 설치할 때 준비한다. [Echo 배포 명세](../examples/echo/packaged.yaml) · [Echo의 동기·Job 호출 예제](job-api.md#개발계에서-켜기)
 
 ### 공통 런타임의 앱 로드
 

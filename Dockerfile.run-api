@@ -1,0 +1,14 @@
+FROM --platform=$BUILDPLATFORM golang:1.27.4 AS build
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY cmd/run-api ./cmd/run-api
+COPY internal ./internal
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/run-api ./cmd/run-api
+
+FROM scratch
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /out/run-api /usr/local/bin/run-api
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/run-api"]

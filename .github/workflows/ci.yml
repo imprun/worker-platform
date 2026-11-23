@@ -53,6 +53,10 @@ jobs:
         run: |
           docker buildx build --load --file Dockerfile.controller --tag worker-platform-controller:ci .
           docker run --rm worker-platform-controller:ci -h
+      - name: Check the Run API image
+        run: |
+          docker buildx build --load --file Dockerfile.run-api --tag worker-platform-run-api:ci .
+          docker run --rm worker-platform-run-api:ci -h
       - name: Build the actor runtime and Echo app package
         run: |
           go build -trimpath -ldflags '-X main.version=ate-smoke-ci' -o "$RUNNER_TEMP/echo-app" ./examples/echo/app

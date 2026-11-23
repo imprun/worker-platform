@@ -11,7 +11,6 @@ import (
 
 	"github.com/imprun/worker-platform/internal/ateclient"
 	"github.com/imprun/worker-platform/internal/controller"
-	"github.com/imprun/worker-platform/internal/jobs"
 	"github.com/imprun/worker-platform/internal/platform"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -57,14 +56,8 @@ func run(ctx context.Context) error {
 		Cluster: platform.KubernetesClient{Client: client},
 		Ready:   connection.Ready,
 	}
-	reconcile := func(ctx context.Context, recordJob func(context.Context, string, string, platform.JobRevision) error) error {
-		return controller.Run(ctx, watchClient, client, *namespace, deployment, recordJob)
+	reconcile := func(ctx context.Context, publications controller.JobPublications) error {
+		return controller.Run(ctx, watchClient, client, *namespace, deployment, publications)
 	}
-	return job.run(ctx, *namespace, reconcile, func(ctx context.Context, name string) (jobs.Publication, error) {
-		uid, revision, err := controller.PublishedJob(ctx, client, *namespace, name)
-		if err == nil && uid == "" {
-			err = jobs.ErrNotFound
-		}
-		return jobs.Publication{WorkerUID: uid, Revision: revision}, err
-	}, deployment, connection.InvokeAttempt)
+	return job.run(ctx, *namespace, reconcile, deployment, connection.InvokeAttempt)
 }

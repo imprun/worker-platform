@@ -2,9 +2,6 @@
   path: /spec/template/spec/containers/0/args/-
   value: -job-site-key-file=/etc/site-sessions/session-key
 - op: add
-  path: /spec/template/spec/containers/0/args/-
-  value: -job-reauth-token-file=/etc/site-sessions/provider-token
-- op: add
   path: /spec/template/spec/containers/0/volumeMounts/-
   value:
     name: site-sessions
@@ -16,3 +13,6 @@
     name: site-sessions
     secret:
       secretName: worker-job-site-sessions
+      items:
+        - key: session-key
+          path: session-key

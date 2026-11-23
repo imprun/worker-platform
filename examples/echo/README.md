@@ -36,7 +36,9 @@ package_v1="$PACKAGE_REPOSITORY@$(crane digest "$PACKAGE_REPOSITORY:v1")"
 package_v2="$PACKAGE_REPOSITORY@$(crane digest "$PACKAGE_REPOSITORY:v2")"
 ```
 
-전용 개발계의 새 `HTTPWorker`에서 시작한다. `packaged.yaml`의 `WorkerProfile`에 런타임 digest와 registry egress를 한 번 설정한 뒤 `appPackage`만 v1 → v2 → v1로 바꾼다. 기본 예제는 패키지 레지스트리의 443 포트를 사용한다. [패키지 배포 명세](packaged.yaml)
+전용 개발계에서 `packaged.yaml`을 적용한다. 이 파일은 Echo 앱 패키지와 `WorkerProfile`을 `HTTPWorker.spec.profile`로 결합한다. 컨트롤러는 ATE에서 Echo를 준비하고, Ready 확인 후 `POST /invoke`를 게시한다. 같은 배포에서 Job도 받으려면 공용 Job API를 준비하고 `spec.jobEnabled: true`를 지정한다. [패키지 배포 명세](packaged.yaml) · [동기 호출과 Job을 함께 게시하는 절차](../../docs/job-api.md#개발계에서-켜기)
+
+`WorkerProfile`에 런타임 digest와 레지스트리 egress를 한 번 설정한 뒤 `appPackage`만 v1 → v2 → v1로 바꾼다. 기본 예제는 패키지 레지스트리의 443 포트를 사용한다.
 
 ```sh
 k() { kubectl --context "$KUBE_CONTEXT" "$@"; }

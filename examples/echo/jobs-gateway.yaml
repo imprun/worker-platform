@@ -5,7 +5,7 @@ metadata:
   namespace: wp-echo-example
 spec:
   selector:
-    app.kubernetes.io/name: worker-controller
+    app.kubernetes.io/name: run-api
   ports:
     - name: http
       port: 80

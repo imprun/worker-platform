@@ -37,11 +37,6 @@ var (
 	errLeaseLost     = errors.New("run lease was lost")
 )
 
-type Publication struct {
-	WorkerUID string
-	Revision  string
-}
-
 type Run struct {
 	ID            string         `json:"runId"`
 	Worker        string         `json:"worker"`

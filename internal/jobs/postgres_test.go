@@ -31,20 +31,22 @@ func TestPostgresRunRetryKeepsRevisionAndOneResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
-	worker := Publication{WorkerUID: scope + "-uid", Revision: "v1"}
-	for _, version := range []string{"v1", "v2"} {
-		rev := platform.JobRevision{
+	apiStore, err := Open(ctx, dsn, scope, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(apiStore.Close)
+	publish := func(version string) {
+		publishJob(t, ctx, store, "echo", scope+"-uid", version, platform.JobRevision{
 			TemplateUID: version,
 			Template:    json.RawMessage(`{"containers":[{"image":"echo:` + version + `"}]}`),
 			Profile:     platform.WorkerProfile{Spec: platform.WorkerProfileSpec{Atespace: scope}},
-		}
-		if err := store.RecordRevision(ctx, worker.WorkerUID, version, rev); err != nil {
-			t.Fatal(err)
-		}
+		})
 	}
+	publish("v1")
 
 	token := strings.Repeat("t", 32)
-	handler := Handler(store, func(context.Context, string) (Publication, error) { return worker, nil }, token, "")
+	handler := Handler(apiStore, token, "")
 	submit := func(body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPost, "/v1/workers/echo/runs", strings.NewReader(body))
 		r.Header.Set("Authorization", "Bearer "+token)
@@ -68,7 +70,7 @@ func TestPostgresRunRetryKeepsRevisionAndOneResult(t *testing.T) {
 			t.Fatalf("concurrent acceptance returned a different receipt: %d %s", response.Code, response.Body)
 		}
 	}
-	worker.Revision = "v2"
+	publish("v2")
 	if response := submit(`{"n":1.0,"message":"original"}`); response.Code != http.StatusAccepted || response.Body.String() != receipts[0].Body.String() {
 		t.Fatalf("replay switched to v2: %d %s", response.Code, response.Body)
 	}
@@ -153,6 +155,13 @@ func TestPostgresRunRetryKeepsRevisionAndOneResult(t *testing.T) {
 	`, scope, first.RunID).Scan(&runs, &count, &number)
 	if err != nil || runs != 1 || count != 1 || number != 2 {
 		t.Fatalf("runs=%d, results=%d, attempt=%d, error=%v", runs, count, number, err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/runs/"+first.RunID+"/result", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || body["version"] != "v1" {
+		t.Fatalf("Run API did not return the pinned result: %d %s", response.Code, response.Body)
 	}
 }
 

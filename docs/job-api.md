@@ -1,18 +1,20 @@
 # 단일 Job 접수와 재시도
 
-`HTTPWorker.spec.jobEnabled: true`를 적용하면 준비 후 게시된 워커 리비전으로 Job을 접수할 수 있다. `worker-controller`는 Run ID, JSON 입력, 불변 ActorTemplate의 UID와 유효 실행 설정을 PostgreSQL에 보관한다. 패키지 워커는 공통 런타임 이미지와 OCI 앱 패키지의 두 digest를 이 리비전에 고정한다. 시도할 때마다 그 리비전으로 별도의 ATE Actor를 만들고, Actor UID와 배정된 Worker ID·Pod UID를 Attempt에 기록한다. [배포 컨트롤러](ate-controller.md) · [PostgreSQL 스키마](../internal/jobs/schema.sql)
+`HTTPWorker.spec.jobEnabled: true`를 적용하면 준비 후 게시된 워커 리비전으로 Job을 접수할 수 있다. `worker-controller`는 ATE Actor가 Ready이고 동기 HTTPRoute가 반영된 뒤, 활성 리비전과 불변 ActorTemplate UID를 PostgreSQL에 게시한다. `run-api`는 활성 리비전을 읽는 트랜잭션에서 Run ID와 JSON 입력을 저장한다. 패키지 워커는 공통 런타임 이미지와 OCI 앱 패키지의 두 digest를 리비전에 고정한다. 컨트롤러는 시도마다 해당 리비전으로 별도의 ATE Actor를 만들고, Actor UID와 배정된 Worker ID·Pod UID를 Attempt에 기록한다. [배포 컨트롤러](ate-controller.md) · [리비전 게시 스키마](../internal/jobs/schema_publications.sql)
 
 리비전과 실행의 접수를 같은 트랜잭션에 기록하고, 원격 호출 전에 실행권을 저장하는 순서는 kagent의 세션과 예약 실행 코드를 참고했다. [kagent 세션 접수](https://github.com/kagent-dev/kagent/blob/dedcef228d064eaf595c7a02e72c0610b39167f5/go/core/internal/database/sessions.go#L103-L141) · [kagent 예약 실행](https://github.com/kagent-dev/kagent/blob/dedcef228d064eaf595c7a02e72c0610b39167f5/go/core/internal/controller/scheduledrun/controller.go#L130-L195)
 
 ```mermaid
 sequenceDiagram
     participant Client as 호출자
-    participant C as worker-controller
+    participant API as run-api
     participant DB as PostgreSQL
+    participant C as worker-controller
     participant A as ATE
-    Client->>C: POST /v1/workers/echo/runs
-    C->>DB: v1 리비전으로 Run 접수
-    C-->>Client: 202 + Run ID
+    C->>DB: Ready인 v1 리비전 게시
+    Client->>API: POST /v1/workers/echo/runs
+    API->>DB: 게시된 v1 리비전으로 Run 접수
+    API-->>Client: 202 + Run ID
     C->>DB: Attempt 1 생성 의도 기록
     C->>A: v1 Actor 생성 및 배정
     C->>DB: Actor UID와 Worker 배정 기록
@@ -22,13 +24,13 @@ sequenceDiagram
     C->>A: 기존 Attempt Actor를 UID로 삭제
     C->>A: 같은 Run의 v1 Actor를 새로 준비
     C->>DB: Attempt 2 결과와 Run 성공을 커밋
-    Client->>C: GET /v1/runs/{id}/result
-    C-->>Client: v1 JSON 결과 한 건
+    Client->>API: GET /v1/runs/{id}/result
+    API-->>Client: v1 JSON 결과 한 건
 ```
 
 ## 개발계에서 켜기
 
-별도 ARM64 gVisor 개발 풀과 Gateway를 준비하고 컨트롤러 배포 가이드의 CA, Router 클라이언트 인증서, 네임스페이스 RBAC를 설치한다. Job API를 쓸 네임스페이스에 PostgreSQL 17 접속 문자열 파일과 32자 이상의 무작위 토큰 파일을 준비하고, Job 코드를 포함한 컨트롤러 이미지의 digest를 사용한다. 컨트롤러가 PostgreSQL 접속 계정으로 스키마를 설치한다. [개발계 설치](ate-controller.md#개발계-설치) · [컨트롤러 이미지](../Dockerfile.controller)
+별도 ARM64 gVisor 개발 풀과 Gateway를 준비하고 컨트롤러 배포 가이드의 CA, Router 클라이언트 인증서, 네임스페이스 RBAC를 설치한다. Job API를 쓸 네임스페이스에 PostgreSQL 17 접속 문자열 파일과 32자 이상의 무작위 토큰 파일을 준비한다. `CONTROLLER_IMAGE`와 `RUN_API_IMAGE`에는 같은 버전에서 빌드한 두 이미지의 digest 참조를 지정한다. 두 Deployment는 같은 DB와 네임스페이스를 사용한다. 시작 시 PostgreSQL에 배타 잠금을 잡고 스키마를 설치한다. [개발계 설치](ate-controller.md#개발계-설치) · [컨트롤러 이미지](../Dockerfile.controller) · [Run API 이미지](../Dockerfile.run-api)
 
 Echo 배포 가이드의 패키지 빌드 단계에서 `runtime_image`, `PACKAGE_HOST`, `package_v1`, `package_v2`를 준비한다. 비공개 레지스트리 CA를 사용하면 `WorkerProfile.spec.appRegistryCA`도 설정한다. [런타임과 Echo 패키지 준비](../examples/echo/README.md#공통-런타임으로-echo-패키지-배포)
 
@@ -45,8 +47,15 @@ sed '/-router-url=/c\
   k set image --local -f - controller="$CONTROLLER_IMAGE" -o yaml |
   k -n "$ns" apply -f -
 k -n "$ns" rollout status deployment/worker-controller --timeout=90s
+k set image --local -f deploy/run-api/deployment.yaml api="$RUN_API_IMAGE" -o yaml |
+  k -n "$ns" apply -f -
+k -n "$ns" rollout status deployment/run-api --timeout=90s
 k apply -f examples/echo/jobs-gateway.yaml
+```
 
+위 Service와 `/v1` 라우트는 예제 네임스페이스의 앱이 함께 사용한다. 한 번 준비한 뒤, 아래처럼 `WorkerProfile`과 `jobEnabled: true`를 지정한 Echo `HTTPWorker`를 한 번에 적용한다. 컨트롤러가 ATE Actor를 준비하고 동기 라우트와 Job 리비전을 게시한다. [앱과 실행 프로필의 결합](architecture.md#echo-배포와-api-게시)
+
+```sh
 apply_job_package() {
   sed -e "s|runtimeImage: .*|runtimeImage: $runtime_image|" \
       -e "s|hostname: packages.example.test|hostname: $PACKAGE_HOST|" \
@@ -71,6 +80,11 @@ wait_job_revision
 auth="Authorization: Bearer $(cat "$JOB_TOKEN_FILE")"
 host='Host: echo.example.test'
 url=http://127.0.0.1:8080
+# 같은 Echo 배포의 동기 호출
+curl -fsS -H "$host" -H 'Content-Type: application/json' \
+  --data '{"message":"hello"}' "$url/invoke"
+
+# 공용 Job API로 같은 Echo 배포에 작업 접수
 receipt="$(curl -fsS -H "$host" -H "$auth" -H 'Idempotency-Key: echo-job-1' \
   -H 'Content-Type: application/json' --data '{"message":"hello"}' \
   "$url/v1/workers/echo/runs")"
@@ -80,7 +94,15 @@ curl -fsS -H "$host" -H "$auth" "$url/v1/runs/$id"
 curl -fsS -H "$host" -H "$auth" "$url/v1/runs/$id/result"
 ```
 
+동기 호출은 Echo의 `message`와 `version`을 바로 반환한다. Job 접수 응답의 `revision`은 접수 시점에 PostgreSQL에 게시된 값이며, 완료 결과는 저장한 Run ID로 조회한다.
+
 Worker 장애를 재현할 때는 전용 풀에 Worker 두 개를 준비하고 Job 입력에 `"waitSeconds": 75`를 추가한다. 이 값은 Echo의 첫 Attempt에만 적용된다. Run의 `attempts[0]`에서 `RUNNING` 상태와 Worker Pod UID를 확인한 뒤 `apply_job_package "$package_v2"`와 `wait_job_revision`을 실행한다. 현재 배포가 v2를 응답하는 동안, 해당 UID가 가리키는 시험 Worker를 종료한다. 같은 Run ID를 조회하면 새 Actor에서 재시도한 v1 결과를 확인할 수 있다.
+
+### 기존 Job API에서 전환
+
+기존 DB와 Secret을 사용해 API Deployment를 먼저 띄운다. 컨트롤러에는 예제의 새 Job 패치를 적용하고 `-job-listen`과 `-job-token-file`은 Run API 배포 설정으로 옮긴다. 재인증을 쓰는 경우에는 양쪽에 같은 세션 암호화 키를 주고 제공자 토큰을 Run API에 설정한다. 이전 컨트롤러에 설치했던 플래그가 남아 있으면 선언에서 제거한다. [재인증 배포 설정](site-session-reauth.md#개발계-설정)
+
+새 컨트롤러는 기존 `status.active.revision`과 저장된 ActorTemplate 리비전이 일치하는 앱부터 Job 게시를 복원한다. 전환 대상 앱의 리비전이 `wp_job_publications`에 활성화됐는지 확인한 뒤 `jobs-gateway.yaml`을 적용한다. 기존 Service 이름과 공개 URL을 사용하며, 기존 Run·Attempt·결과는 같은 DB에서 조회한다. 컨트롤러 교체부터 Service 전환까지 Job API에는 짧은 접속 중단이 생길 수 있다.
 
 ## 구현된 계약
 
@@ -122,6 +144,19 @@ ON CONFLICT (worker_pool) DO UPDATE SET max_slots = EXCLUDED.max_slots;
 DB와 ATE의 Job Actor 배정을 117회 관찰하고, 전체 Attempt의 예약 시작·반환 시각도 대조했다. 6개 Run에서 Attempt와 결과가 각각 한 건씩 생성됐고 완료 뒤 Job Actor는 0개였다. 마이그레이션은 기존 리비전에서 두 풀을 채웠으며 먼저 저장해 둔 Run과 결과 2건을 보존했다. [PostgreSQL 예약 경합 테스트](../internal/jobs/pool_slots_test.go)
 
 ## ARM64 gVisor 개발계 검증
+
+### 분리한 Run API와 Echo 전환
+
+2026년 11월 23일, 별도 ARM64 gVisor Worker 두 대와 `run-api` 복제본 두 개에서 시험했다. 같은 Gateway의 `/invoke`는 ATE Router를, `/v1`은 Run API Service를 사용했다. 공통 런타임 이미지 digest를 고정하고 Echo 앱 패키지 digest를 바꿨다. 새 패키지의 준비 검사는 4초 지연으로 대기 구간을 만들었다.
+
+| 검증 | 관찰 결과 |
+| --- | --- |
+| 준비 중 접수와 동기 호출 | 새 세대가 `Ready=False`인 동안 `/invoke`에서 v1을 받았고, 새 Job `7973ef4d-bc7d-444c-a901-958fe176891f`는 v1 리비전으로 `202` 접수됐다. 전환 관측 중 동기 호출은 v1 13건을 반환했다. |
+| 게시 후 전환 | HTTPRoute UID와 URL이 유지됐고 `/invoke`는 v2를 반환했다. 새 Job `1c7b1b97-2d9b-4ca2-a2f5-3a69f5e1c255`는 PostgreSQL에 게시된 v2로 접수됐다. |
+| 기존 Run 재조회 | 원래 멱등 키로 같은 입력을 다시 보내 기존 Run `fbe938c2-8a8d-4d30-a213-60a36bd42b35`를 받았다. 입력을 바꿔 같은 키를 보내면 `409`였다. 기존 Run ID로 조회한 v1 결과는 한 건이었다. |
+| 결과와 슬롯 | v1·v1·v2로 접수한 세 Run이 결과를 각각 한 건씩 남겼다. 완료 뒤 Job Actor와 점유 슬롯은 모두 0개였다. |
+
+시험 노드의 CPU 예약 여유가 작아 전용 Worker Pod의 요청량을 2m로 설정했다. Actor 배치 용량은 Worker당 60m였다. 시험 Atespace와 풀을 회수한 뒤 기존 Actor 17개의 UID·상태·Worker 배정이 시험 전과 일치했다.
 
 ### 공통 런타임과 Echo 앱 패키지
 

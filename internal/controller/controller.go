@@ -34,11 +34,18 @@ type Controller struct {
 	workers    dynamic.ResourceInterface
 	profiles   dynamic.ResourceInterface
 	deployment platform.ATEDeployment
-	recordJob  func(context.Context, string, string, platform.JobRevision) error
+	jobs       JobPublications
+}
+
+type JobPublications interface {
+	PublishedWorkers(context.Context) ([]string, error)
+	PublicationEpoch(context.Context) (int64, error)
+	ObserveWorker(ctx context.Context, worker, uid, priorRevision string, enabled bool, epoch int64) (bool, error)
+	PublishRevision(ctx context.Context, worker, uid, revision string, epoch int64, snapshot platform.JobRevision) (bool, error)
 }
 
 func Run(ctx context.Context, watchClient, client dynamic.Interface, namespace string, deployment platform.ATEDeployment,
-	recordJob func(context.Context, string, string, platform.JobRevision) error) error {
+	jobs JobPublications) error {
 	if namespace == "" {
 		return errors.New("controller namespace is required")
 	}
@@ -46,7 +53,7 @@ func Run(ctx context.Context, watchClient, client dynamic.Interface, namespace s
 		workers:    client.Resource(workersGVR).Namespace(namespace),
 		profiles:   client.Resource(profilesGVR).Namespace(namespace),
 		deployment: deployment,
-		recordJob:  recordJob,
+		jobs:       jobs,
 	}
 	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(watchClient, 0, namespace, nil)
 	workers := factory.ForResource(workersGVR).Informer()
@@ -62,6 +69,9 @@ func Run(ctx context.Context, watchClient, client dynamic.Interface, namespace s
 	)
 	defer queue.ShutDown()
 	enqueueWorker := func(obj any) {
+		if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+			obj = tombstone.Obj
+		}
 		queue.Add(obj.(*unstructured.Unstructured).GetName())
 	}
 	enqueueProfileWorkers := func(obj any) {
@@ -78,7 +88,7 @@ func Run(ctx context.Context, watchClient, client dynamic.Interface, namespace s
 			enqueueWorker(match)
 		}
 	}
-	if err := registerEvents(workers, enqueueWorker, nil); err != nil {
+	if err := registerEvents(workers, enqueueWorker, enqueueWorker); err != nil {
 		return err
 	}
 	if err := registerEvents(factory.ForResource(profilesGVR).Informer(), enqueueProfileWorkers, enqueueProfileWorkers); err != nil {
@@ -88,6 +98,17 @@ func Run(ctx context.Context, watchClient, client dynamic.Interface, namespace s
 	defer factory.Shutdown()
 	if synced := factory.WaitForCacheSync(ctx.Done()); !synced[workersGVR] || !synced[profilesGVR] {
 		return ctx.Err()
+	}
+	if jobs != nil {
+		db, cancel := context.WithTimeout(ctx, 8*time.Second)
+		names, err := jobs.PublishedWorkers(db)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("list Job publications for reconciliation: %w", err)
+		}
+		for _, name := range names {
+			queue.Add(name)
+		}
 	}
 
 	var workersDone sync.WaitGroup
@@ -139,12 +160,38 @@ func (c Controller) processQueue(ctx context.Context, queue workqueue.TypedRateL
 var errSuperseded = errors.New("worker or profile changed during reconciliation")
 
 func (c Controller) reconcile(ctx context.Context, name string) error {
-	worker, err := c.workers.Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) || err == nil && worker.GetDeletionTimestamp() != nil {
-		return nil
+	var epoch int64
+	if c.jobs != nil {
+		db, cancel := context.WithTimeout(ctx, 8*time.Second)
+		var err error
+		epoch, err = c.jobs.PublicationEpoch(db)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("begin Job publication reconciliation: %w", err)
+		}
 	}
-	if err != nil {
+	worker, err := c.workers.Get(ctx, name, metav1.GetOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
 		return err
+	}
+	exists := err == nil && worker.GetDeletionTimestamp() == nil
+	if c.jobs != nil {
+		var uid, priorRevision string
+		var enabled bool
+		if exists {
+			uid = string(worker.GetUID())
+			enabled, _, _ = unstructured.NestedBool(worker.Object, "spec", "jobEnabled")
+			priorRevision, _, _ = unstructured.NestedString(worker.Object, "status", "active", "revision")
+		}
+		db, cancel := context.WithTimeout(ctx, 8*time.Second)
+		current, err := c.jobs.ObserveWorker(db, name, uid, priorRevision, enabled, epoch)
+		cancel()
+		if err != nil || !current {
+			return err
+		}
+	}
+	if !exists {
+		return nil
 	}
 
 	w, err := readWorker(worker)
@@ -180,12 +227,15 @@ func (c Controller) reconcile(ctx context.Context, name string) error {
 	if err != nil {
 		return errors.Join(err, c.record(ctx, worker, profile, "DeploymentPending", err.Error(), nil))
 	}
-	if result.Job != nil && c.recordJob != nil {
+	if result.Job != nil && c.jobs != nil {
 		record, cancel := context.WithTimeout(ctx, 8*time.Second)
-		err := c.recordJob(record, string(worker.GetUID()), result.Revision, *result.Job)
+		current, err := c.jobs.PublishRevision(record, name, string(worker.GetUID()), result.Revision, epoch, *result.Job)
 		cancel()
 		if err != nil {
-			return fmt.Errorf("record runnable revision: %w", err)
+			return fmt.Errorf("publish Job revision: %w", err)
+		}
+		if !current {
+			return nil
 		}
 	}
 	return c.record(ctx, worker, profile, "Published", "Actor ready and HTTPRoute accepted", &result)

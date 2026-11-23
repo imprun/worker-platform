@@ -38,14 +38,12 @@ func TestPostgresPoolSlotsAcrossControllers(t *testing.T) {
 	}
 	admit := func(s *Store, pool platform.ObjectName) Run {
 		t.Helper()
-		pub := Publication{WorkerUID: s.namespace + "-" + pool.Name, Revision: "v1"}
-		snapshot := platform.JobRevision{TemplateUID: pub.WorkerUID, Profile: platform.WorkerProfile{
+		uid := s.namespace + "-" + pool.Name
+		snapshot := platform.JobRevision{TemplateUID: uid, Profile: platform.WorkerProfile{
 			Spec: platform.WorkerProfileSpec{Atespace: s.namespace, WorkerPool: pool},
 		}}
-		if err := s.RecordRevision(ctx, pub.WorkerUID, pub.Revision, snapshot); err != nil {
-			t.Fatal(err)
-		}
-		run, err := s.Admit(ctx, "echo-"+pool.Name, pub, "one", json.RawMessage(`{}`), "")
+		publishJob(t, ctx, s, "echo-"+pool.Name, uid, "v1", snapshot)
+		run, err := s.Admit(ctx, "echo-"+pool.Name, "one", json.RawMessage(`{}`), "")
 		if err != nil {
 			t.Fatal(err)
 		}

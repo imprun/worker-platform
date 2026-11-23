@@ -31,25 +31,22 @@ func TestPostgresReauthReleasesSlotAndResumesOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
-	pub := Publication{WorkerUID: scope, Revision: "v1"}
 	snapshot := platform.JobRevision{
 		TemplateUID: "v1", Profile: platform.WorkerProfile{Spec: platform.WorkerProfileSpec{Atespace: scope}},
 	}
-	if err := store.RecordRevision(ctx, pub.WorkerUID, pub.Revision, snapshot); err != nil {
-		t.Fatal(err)
-	}
+	publishJob(t, ctx, store, "echo", scope, "v1", snapshot)
 	const ref = "account-a"
 	state := func(value string) SiteStateUpdate {
 		return SiteStateUpdate{State: json.RawMessage(`{"cookie":"` + value + `"}`), ExpiresAt: time.Now().Add(time.Hour)}
 	}
-	if _, err := store.CreateSiteSession(ctx, pub.WorkerUID, ref, state("private-expired")); err != nil {
+	if _, err := store.CreateSiteSession(ctx, scope, ref, state("private-expired")); err != nil {
 		t.Fatal(err)
 	}
-	run, err := store.Admit(ctx, "echo", pub, "job-with-session", json.RawMessage(`{}`), ref)
+	run, err := store.Admit(ctx, "echo", "job-with-session", json.RawMessage(`{}`), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Admit(ctx, "echo", pub, "job-with-session", json.RawMessage(`{}`), ""); !errors.Is(err, ErrInputConflict) {
+	if _, err := store.Admit(ctx, "echo", "job-with-session", json.RawMessage(`{}`), ""); !errors.Is(err, ErrInputConflict) {
 		t.Fatalf("receipt accepted a different site session: %v", err)
 	}
 	runtime := &reauthRuntime{t: t, cleanupBlocked: true}
@@ -107,7 +104,7 @@ func TestPostgresReauthReleasesSlotAndResumesOnce(t *testing.T) {
 		t.Fatalf("cannot start reauth: %+v %v", receipt, err)
 	}
 	const submitToken = "test-submission-token"
-	handler := Handler(store, nil, submitToken, "private-provider-token")
+	handler := Handler(store, submitToken, "private-provider-token")
 	unauthorized := httptest.NewRequest(http.MethodPost, "/internal/v1/runs/"+run.ID+"/reauth/"+request+"/complete", strings.NewReader("{}"))
 	unauthorized.Header.Set("Authorization", "Bearer "+submitToken)
 	response := httptest.NewRecorder()

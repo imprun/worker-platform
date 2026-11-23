@@ -2,7 +2,7 @@
 
 ## PostgreSQL 회귀 테스트
 
-모든 PR과 `main` 푸시의 기본 CI가 PostgreSQL 17에서 단일 Job 계약을 검증한다. 서로 다른 컨트롤러가 같은 풀의 마지막 슬롯을 요청할 때 한 번만 예약되는지, 대기 중인 풀을 건너 다른 풀이 진행되는지 검사한다. 이전 스키마 v2로 저장한 완료 결과와 실행 중인 Attempt를 v3로 이관한 뒤 조회한다. 기존 Attempt가 정리될 때까지 새 Run이 그 슬롯을 사용할 수 없는지 확인한다. [예약 경합 테스트](../internal/jobs/pool_slots_test.go) · [이관 테스트](../internal/jobs/pool_migration_test.go)
+모든 PR과 `main` 푸시의 기본 CI가 PostgreSQL 17에서 단일 Job 계약을 검증한다. 서로 다른 컨트롤러가 같은 풀의 마지막 슬롯을 요청할 때 한 번만 예약되는지, 대기 중인 풀을 건너 다른 풀이 진행되는지 검사한다. 이전 스키마 v2로 저장한 완료 결과와 실행 중인 Attempt를 현재 스키마로 이관해 조회한다. 기존 멱등 영수증과 점유 슬롯을 보존하고, 새 리비전 게시가 늦게 도착한 이전 갱신으로 되돌아가지 않는지 확인한다. [예약 경합 테스트](../internal/jobs/pool_slots_test.go) · [이관 테스트](../internal/jobs/pool_migration_test.go) · [게시 경합 테스트](../internal/jobs/publications_test.go)
 
 로컬의 시험 PostgreSQL을 사용할 때는 `WORKER_JOB_TEST_DSN`을 지정한다. 이관 테스트는 연결한 DB에 고유한 시험 스키마를 생성하고 종료할 때 제거한다.
 
@@ -17,6 +17,7 @@ WORKER_JOB_TEST_DSN='postgresql://jobs:jobs@127.0.0.1:5432/jobs?sslmode=disable'
 | --- | --- |
 | Gateway에서 ATE Router로 mTLS 연결 | 독립 Echo 예제를 배포해 Gateway에서 HTTP 200과 Echo JSON을 확인했다. 같은 명세를 재적용했을 때 Actor UID가 유지됐다. [실행 스크립트](../examples/echo/run.sh) · [ATE 직접 배포 검증](ate-deployment.md#개발계-검증-기록) |
 | OCI 패키지 전환과 롤백 | 런타임 이미지 digest를 고정한 상태에서 앱 v1 → v2 → v1을 적용했다. v2 준비 중 v1 응답을 확인했고, 롤백 시 기존 v1 Actor UID와 같은 HTTPRoute UID를 확인했다. [배포 절차](../examples/echo/README.md#공통-런타임으로-echo-패키지-배포) · [실측 기록](../examples/echo/README.md#공통-런타임과-echo-앱-패키지) |
+| 분리한 Run API와 Echo 전환 | 두 Run API 복제본에서 v2 준비 중 v1 동기 응답과 v1 Job 접수, 게시 후 v2 전환을 확인했다. 최초 Run ID로 v1 결과 한 건을 조회했으며 완료 뒤 Job Actor와 슬롯은 0개였다. [실측 기록](job-api.md#분리한-run-api와-echo-전환) |
 | Worker 손실 후 단일 Job 복구 | 실행 중 v2를 배포한 뒤 시험 Worker를 종료했다. 다른 Worker의 새 Actor가 같은 Run ID의 v1 리비전을 실행했다. 결과는 한 건이었으며 완료 후 Job Actor와 슬롯은 0개였다. [장애 재현 절차](job-api.md#개발계에서-켜기) · [실측 기록](job-api.md#공통-런타임과-echo-앱-패키지) |
 | HITL 대기 후 재개 | 재인증 대기 중 Job Actor와 슬롯이 0개였다. 패키지 v2 배포와 모의 재인증을 거친 뒤에도 새 Actor가 같은 Run ID로 v1 결과 한 건을 기록했다. [재인증 실행 절차](site-session-reauth.md#만료와-모의-재인증-호출) · [실측 기록](site-session-reauth.md#공통-런타임과-echo-앱-패키지) |
 | 복제본 간 슬롯 경합과 포화 격리 | PostgreSQL CI가 마지막 슬롯 예약 경합과 데이터 이관을 확인한다. 두 전용 ARM64 gVisor 풀에서 A의 슬롯이 모두 찬 동안 B의 Job이 완료됐다. [CI 테스트](../internal/jobs/pool_slots_test.go) · [실측 기록](job-api.md#풀-두-개와-복제본-두-개-검증) |

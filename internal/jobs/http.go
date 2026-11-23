@@ -24,15 +24,12 @@ var (
 	siteRefPattern    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 )
 
-type ResolvePublication func(context.Context, string) (Publication, error)
-
 type httpAPI struct {
-	store   *Store
-	resolve ResolvePublication
+	store *Store
 }
 
-func Handler(store *Store, resolve ResolvePublication, token, providerToken string) http.Handler {
-	api := httpAPI{store: store, resolve: resolve}
+func Handler(store *Store, token, providerToken string) http.Handler {
+	api := httpAPI{store: store}
 	public := http.NewServeMux()
 	public.HandleFunc("POST /v1/workers/{worker}/runs", api.submit)
 	public.HandleFunc("GET /v1/runs/{id}", api.status)
@@ -95,12 +92,7 @@ func (api httpAPI) submit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, ErrInvalidJSON)
 		return
 	}
-	publication, err := api.resolve(r.Context(), worker)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	run, err := api.store.Admit(r.Context(), worker, publication, key[0], input, sessionRef)
+	run, err := api.store.Admit(r.Context(), worker, key[0], input, sessionRef)
 	if err != nil {
 		writeError(w, err)
 		return
