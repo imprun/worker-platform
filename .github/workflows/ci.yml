@@ -39,9 +39,14 @@ jobs:
             exit 1
           fi
       - run: go vet ./...
-      - run: go test -race ./...
+      - name: Go unit and contract tests
+        run: go test -race -skip '^TestPostgres' ./...
+      - name: PostgreSQL reservation, migration, and Job tests
+        run: go test -race -count=1 -run '^TestPostgres' -v ./internal/jobs
         env:
           WORKER_JOB_TEST_DSN: postgres://jobs:ci-jobs@127.0.0.1:${{ job.services.postgres.ports[5432] }}/jobs?sslmode=disable
+      - name: Check the ATE integration gate
+        run: python3 -B -m unittest scripts/test_ate_integration.py
       - name: Render the direct ATE example
         run: go run ./cmd/workerctl render -f examples/echo/ate-worker.yaml -profile examples/echo/ate-profile.yaml > "$RUNNER_TEMP/echo-ate-plan.txt"
       - name: Check the controller image

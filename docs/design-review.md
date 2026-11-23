@@ -29,6 +29,8 @@
 
 ## 출시 인수 시험
 
+기본 CI에서 PostgreSQL 경합과 이관을 반복 검증한다. 아래 ATE 실환경 시험은 연동 변경을 기준으로 선택한다. 이미 확인한 동작은 이전 PoC의 스크립트와 증거를 이어서 사용한다. [테스트 실행 기준](testing.md)
+
 격리한 개발 환경에 전용 Gateway 리스너, Atespace, ARM64 gVisor 다중 Worker 및 모의 사이트를 준비한다. 장애 대상은 플랫폼이 생성한 시험용 리소스의 UID로 식별한다. CI에서 실행 가능한 시험 스크립트에 실행 ID, 리비전, 시도 번호, Worker 배정, 결과 개수와 마지막 슬롯 상태를 남긴다. Testkube를 사용하는 환경은 동일한 스크립트와 증거를 TestWorkflow 실행에 연결할 수 있다. [Testkube 아티팩트 수집](https://docs.testkube.io/articles/logs-and-artifacts)
 
 | 요구사항 | 시험과 수집할 증거 |

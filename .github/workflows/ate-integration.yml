@@ -1,0 +1,50 @@
+name: ATE integration
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Base commit for the integration change check
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  BASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.base || github.event.before }}
+
+jobs:
+  changes:
+    name: Detect ATE integration changes
+    runs-on: ubuntu-latest
+    outputs:
+      required: ${{ steps.scope.outputs.required }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: scope
+        run: python3 scripts/ate_integration.py "$BASE_REF" "$GITHUB_SHA"
+
+  smoke:
+    name: Live ATE smoke
+    needs: changes
+    if: github.ref == 'refs/heads/main' && needs.changes.outputs.required == 'true' && vars.ATE_INTEGRATION_ENABLED == 'true'
+    runs-on: [self-hosted, linux, ate-integration]
+    timeout-minutes: 15
+    concurrency:
+      group: worker-platform-ate-integration
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - run: python3 scripts/ate_integration.py --run "$BASE_REF" "$GITHUB_SHA"
