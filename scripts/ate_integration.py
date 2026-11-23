@@ -1,4 +1,4 @@
-"""Select and run the existing Echo smoke test for ATE integration changes."""
+"""Select and run the packaged Echo smoke test for ATE integration changes."""
 
 import argparse
 import json
@@ -99,7 +99,7 @@ def main():
         if head != resolve("HEAD") or output("git", "status", "--porcelain"):
             raise ValueError("check out the candidate commit with a clean worktree before the live smoke test")
         require_fixture()
-        subprocess.run(("sh", "examples/echo/run.sh"), cwd=ROOT, check=True)
+        subprocess.run(("sh", "examples/echo/run.sh", "--packaged"), cwd=ROOT, check=True)
 
 
 if __name__ == "__main__":

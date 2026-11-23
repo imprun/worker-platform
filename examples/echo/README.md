@@ -4,6 +4,8 @@ Echo 앱은 JSON의 `message`를 읽고 `message`와 `version`을 반환한다. 
 
 ## 공통 런타임으로 Echo 패키지 배포
 
+연동 변경용 실환경 스모크는 이 예제와 공통 런타임을 후보 커밋에서 빌드하고, 두 digest를 고정해 `workerctl`로 배포한다. [스모크 설정과 실행](../../docs/testing.md#ate-실환경-테스트)
+
 먼저 개발계에 CRD, `worker-controller`, 전용 ARM64 gVisor 풀, Gateway를 설치한다. ATE Worker가 런타임 이미지를 당겨올 레지스트리와 Actor가 읽을 패키지 레지스트리를 준비한다. Actor는 `WorkerProfile.spec.egress`의 `tlsPassthrough` 정책으로 패키지 레지스트리의 HTTPS 호스트와 포트에 접근한다. 개발계는 ATE egress에서 읽기 전용 HTTPS 주소를 사용했다. 비공개 CA를 사용하면 `WorkerProfile.spec.appRegistryCA`에 서버 신뢰에 사용할 인증서 PEM을 넣는다. [개발계 컨트롤러 설치](../../docs/ate-controller.md#개발계-설치)
 
 저장소 루트에서 런타임 이미지를 한 번 게시하고, Linux ARM64용 Echo 실행 파일로 v1·v2 OCI 패키지를 각각 게시한다. `crane`이 앱 패키지를 게시할 수 있도록 로컬 레지스트리 인증을 준비한다. v2에는 전환 중 기존 응답을 확인할 수 있도록 4초짜리 시작 점검을 넣는다. [런타임 Dockerfile](../../Dockerfile.actor-runtime) · [패키지 빌더](../../scripts/build-app-package.py)

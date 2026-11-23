@@ -55,11 +55,17 @@ jobs:
           docker run --rm worker-platform-controller:ci -h
       - name: Build the actor runtime and Echo app package
         run: |
-          go build -trimpath -o "$RUNNER_TEMP/echo-app" ./examples/echo/app
+          go build -trimpath -ldflags '-X main.version=ate-smoke-ci' -o "$RUNNER_TEMP/echo-app" ./examples/echo/app
           "$RUNNER_TEMP/echo-app" --check
           response=$(printf '%s' '{"input":{"message":"hello"}}' | "$RUNNER_TEMP/echo-app")
-          test "$response" = '{"message":"hello","version":"v1"}'
-          python3 scripts/build-app-package.py "$RUNNER_TEMP/echo-app" "$RUNNER_TEMP/echo-package"
+          test "$response" = '{"message":"hello","version":"ate-smoke-ci"}'
+          package_digest=$(python3 scripts/build-app-package.py "$RUNNER_TEMP/echo-app" "$RUNNER_TEMP/echo-package")
+          runtime_image=registry.example.test/workers/actor-runtime@sha256:1111111111111111111111111111111111111111111111111111111111111111
+          app_package="packages.example.test:8443/workers/echo@$package_digest"
+          python3 examples/echo/packaged_smoke.py "$RUNNER_TEMP" "$runtime_image" "$app_package"
+          go run ./cmd/workerctl render -f "$RUNNER_TEMP/worker.yaml" -profile "$RUNNER_TEMP/profile.yaml" -output template |
+            jq -e --arg image "$runtime_image" --arg package "$app_package" \
+              '.containers[0] | .image == $image and any(.env[]; .name == "WORKER_APP_PACKAGE" and .value == $package)'
           docker buildx build --load --file Dockerfile.actor-runtime --tag worker-platform-runtime:ci .
           docker run --rm worker-platform-runtime:ci -h
       - name: Check the Echo image and example script

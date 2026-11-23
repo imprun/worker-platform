@@ -33,10 +33,14 @@ python3 scripts/ate_integration.py "$base" HEAD
 
 `ATE integration` 워크플로는 `main` 푸시에서 직전 SHA와 후보 SHA를 비교한다. 수동 실행에서는 `base` 커밋을 받는다. 대상 변경이 있고 저장소 변수 `ATE_INTEGRATION_ENABLED=true`가 설정된 경우에만 전용 Linux 러너의 `ate-integration` 레이블에서 실환경 스모크를 실행한다. 기본 CI와 변경 판정은 클러스터 자격 없이 실행된다. [실환경 워크플로](../.github/workflows/ate-integration.yml)
 
-로컬에서 스모크를 실행할 때도 동일한 판정을 사용한다. 검증할 커밋을 체크아웃하고 [Echo 개발계 준비](../examples/echo/README.md#개발계-준비)로 전용 테스트 환경을 마련한다. 기존 Echo 스크립트의 자격 파일과 `KUBE_CONTEXT`를 설정한다. 실험 환경에 맞는 `ATE_TEST_CLUSTER_UID`의 kube-system UID, `ATE_TEST_NAMESPACE_UID`, `ATE_TEST_POOL_UID`, `ATE_TEST_SPACE_UID`를 전달한다. `kubectl ate`는 이 컨텍스트의 ATE를 조회할 수 있어야 한다. 스모크는 해당 UID들과 Actor·ActorTemplate·HTTPRoute가 비어 있는지 확인한 뒤 Echo를 배포한다.
+로컬에서 스모크를 실행할 때도 동일한 판정을 사용한다. 검증할 커밋을 체크아웃하고 전용 테스트 환경을 마련한다. Echo 스크립트의 자격 파일과 `KUBE_CONTEXT`를 설정한다. 환경에 맞는 kube-system 네임스페이스 UID를 `ATE_TEST_CLUSTER_UID`에 지정하고 `ATE_TEST_NAMESPACE_UID`, `ATE_TEST_POOL_UID`, `ATE_TEST_SPACE_UID`도 설정한다. `kubectl ate`는 이 컨텍스트의 ATE를 조회할 수 있어야 한다. 스모크는 UID가 일치하고 전용 공간의 Actor·ActorTemplate·HTTPRoute가 비어 있는지 확인한 뒤 배포한다. [Echo 개발계 준비](../examples/echo/README.md#개발계-준비)
+
+전용 레지스트리에 게시할 수 있는 Docker Buildx와 `crane`, Go, Python 3, `jq`, `curl`을 러너에 준비한다. `RUNTIME_REPOSITORY`와 `PACKAGE_REPOSITORY`는 ATE가 각각 런타임 이미지와 앱 패키지를 읽는 저장소다. 게시 주소가 다르면 같은 저장소의 쓰기 주소를 `RUNTIME_PUSH_REPOSITORY`, `PACKAGE_PUSH_REPOSITORY`에 지정한다. 패키지 레지스트리의 HTTPS에 사설 CA를 쓰면 `PACKAGE_REGISTRY_CA`에 CA PEM 파일 경로를 설정한다. 앱 레지스트리의 호스트와 포트는 패키지 참조에서 읽어 테스트 프로필의 egress에 설정한다.
 
 ```sh
+export RUNTIME_REPOSITORY=registry.example.test/workers/actor-runtime
+export PACKAGE_REPOSITORY=packages.example.test/workers/echo
 python3 scripts/ate_integration.py --run "$base" HEAD
 ```
 
-이 진입점은 실제 ATE에 독립 Echo Actor를 배포하고 Gateway 경유 응답·대상 헤더 덮어쓰기·공개 준비 경로 차단을 확인한다. 실험이 끝나면 전용 환경의 소유자가 예제의 정리 절차를 사용한다. OCI 로딩 계약이나 Worker 장애 처리의 연동이 바뀌면 앞 표의 실행 절차에서 해당 경로를 검증한다. [Echo 실험 정리](../examples/echo/README.md#예제-정리)
+스모크는 체크아웃한 커밋에서 Linux ARM64 공통 런타임 이미지와 `examples/echo/app` OCI 패키지를 빌드하고 게시한다. 패키지의 게시 digest가 로컬 매니페스트 digest와 일치하는지 확인한 뒤, 이미지와 앱의 digest를 각각 고정해 `workerctl`로 배포한다. Gateway 경유 응답의 `version`으로 이번에 빌드한 패키지가 실행됐는지 검사하며 대상 헤더 덮어쓰기와 공개 준비 경로 차단도 확인한다. 실험이 끝나면 전용 환경의 소유자가 예제의 정리 절차를 사용한다. [Echo 실험 정리](../examples/echo/README.md#예제-정리)

@@ -46,7 +46,7 @@ class IntegrationGateTest(unittest.TestCase):
             with patch("sys.argv", ["ate_integration.py", "--run", "base"]):
                 gate.main()
             check_fixture.assert_called_once()
-            smoke.assert_called_once_with(("sh", "examples/echo/run.sh"), cwd=gate.ROOT, check=True)
+            smoke.assert_called_once_with(("sh", "examples/echo/run.sh", "--packaged"), cwd=gate.ROOT, check=True)
 
 
 class FixtureTest(unittest.TestCase):
