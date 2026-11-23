@@ -2,6 +2,7 @@ package platform
 
 import (
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/imprun/worker-platform/internal/apppackage"
 	ate "go.ate.dev/substrate/api/ateapi/v1"
 )
 
@@ -27,14 +29,16 @@ type WorkerProfile struct {
 }
 
 type WorkerProfileSpec struct {
-	Atespace     string       `yaml:"atespace" json:"atespace"`
-	WorkerPool   ObjectName   `yaml:"workerPool" json:"workerPool"`
-	PoolID       string       `yaml:"poolID" json:"poolID"`
-	Architecture string       `yaml:"architecture" json:"architecture"`
-	SandboxClass string       `yaml:"sandboxClass" json:"sandboxClass"`
-	CPU          string       `yaml:"cpu" json:"cpu"`
-	Memory       string       `yaml:"memory" json:"memory"`
-	Egress       []EgressRule `yaml:"egress" json:"egress"`
+	Atespace      string       `yaml:"atespace" json:"atespace"`
+	WorkerPool    ObjectName   `yaml:"workerPool" json:"workerPool"`
+	PoolID        string       `yaml:"poolID" json:"poolID"`
+	Architecture  string       `yaml:"architecture" json:"architecture"`
+	SandboxClass  string       `yaml:"sandboxClass" json:"sandboxClass"`
+	CPU           string       `yaml:"cpu" json:"cpu"`
+	Memory        string       `yaml:"memory" json:"memory"`
+	Egress        []EgressRule `yaml:"egress" json:"egress"`
+	RuntimeImage  string       `yaml:"runtimeImage,omitempty" json:"runtimeImage,omitempty"`
+	AppRegistryCA string       `yaml:"appRegistryCA,omitempty" json:"appRegistryCA,omitempty"`
 }
 
 type EgressRule struct {
@@ -67,6 +71,14 @@ func (p WorkerProfile) Validate() error {
 	}
 	if !cpuPattern.MatchString(s.CPU) || !memoryPattern.MatchString(s.Memory) || s.resources().GetCpuMillicores() > 999999 {
 		return errors.New("profile CPU must be positive and below 1000 cores, and memory must be positive Mi or Gi")
+	}
+	if s.RuntimeImage != "" && (!imagePattern.MatchString(s.RuntimeImage) || len(s.RuntimeImage) > 512) {
+		return errors.New("profile runtimeImage must be a repository reference pinned to a SHA-256 digest")
+	}
+	if s.AppRegistryCA != "" {
+		if err := apppackage.AppendRegistryCA(x509.NewCertPool(), s.AppRegistryCA); err != nil {
+			return fmt.Errorf("profile appRegistryCA: %w", err)
+		}
 	}
 	if len(s.Egress) > 256 {
 		return errors.New("profile must contain at most 256 egress rules")
@@ -146,17 +158,14 @@ func buildATEPlan(w Worker, p WorkerProfile, owner string) (ATEPlan, error) {
 	if p.Metadata.Namespace != w.Metadata.Namespace || p.Metadata.Name != w.Spec.Profile {
 		return ATEPlan{}, errors.New("WorkerProfile name and namespace must match the worker's profile reference")
 	}
+	container, err := workerContainer(w.Spec, p.Spec)
+	if err != nil {
+		return ATEPlan{}, err
+	}
 	template := &ate.ActorTemplate{
 		WorkerSelector: &ate.Selector{MatchLabels: map[string]string{PoolIDLabel: p.Spec.PoolID}},
-		Containers: []*ate.Container{{
-			Name:  "worker",
-			Image: w.Spec.Image,
-			WakeupProbe: &ate.WakeupProbe{
-				HttpGet:        &ate.HttpGetAction{Path: actorReadyPath, Port: 80},
-				TimeoutSeconds: 30,
-			},
-		}},
-		Resources: &ate.ResourceRequirements{Limits: p.Spec.resources()},
+		Containers:     []*ate.Container{container},
+		Resources:      &ate.ResourceRequirements{Limits: p.Spec.resources()},
 		SnapshotConfig: &ate.SnapshotConfig{
 			PreferredFidelity: ate.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY,
 			GoldenSnapshotConfig: &ate.GoldenSnapshotConfig{
@@ -185,4 +194,37 @@ func buildATEPlan(w Worker, p WorkerProfile, owner string) (ATEPlan, error) {
 	}
 	route, err := buildRoute(w, owner, p.Spec.Atespace+"/"+name)
 	return ATEPlan{Revision: fmt.Sprintf("%x", sum), Template: template, Actor: actor, Policy: policy, Route: route}, err
+}
+
+func workerContainer(worker WorkerSpec, profile WorkerProfileSpec) (*ate.Container, error) {
+	container := &ate.Container{
+		Name:  "worker",
+		Image: worker.Image,
+		WakeupProbe: &ate.WakeupProbe{
+			HttpGet:        &ate.HttpGetAction{Path: actorReadyPath, Port: 80},
+			TimeoutSeconds: 30,
+		},
+	}
+	if worker.AppPackage == "" {
+		return container, nil
+	}
+	if profile.RuntimeImage == "" {
+		return nil, errors.New("app packages require a WorkerProfile runtimeImage")
+	}
+	ref, err := apppackage.ParseReference(worker.AppPackage)
+	if err != nil {
+		return nil, err
+	}
+	allowed := slices.ContainsFunc(profile.Egress, func(rule EgressRule) bool {
+		return rule.Protocol == "tlsPassthrough" && rule.Hostname == ref.Host && rule.Port == ref.Port
+	})
+	if !allowed {
+		return nil, fmt.Errorf("app registry %s:%d requires a tlsPassthrough rule in WorkerProfile", ref.Host, ref.Port)
+	}
+	container.Image = profile.RuntimeImage
+	container.Env = []*ate.EnvVar{{Name: apppackage.ReferenceEnv, Value: ref.String()}}
+	if profile.AppRegistryCA != "" {
+		container.Env = append(container.Env, &ate.EnvVar{Name: apppackage.RegistryCAEnv, Value: profile.AppRegistryCA})
+	}
+	return container, nil
 }

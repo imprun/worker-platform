@@ -1,0 +1,14 @@
+FROM --platform=$BUILDPLATFORM golang:1.27.4 AS build
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY cmd/actor-runtime ./cmd/actor-runtime
+COPY internal/apppackage ./internal/apppackage
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/worker-actor-runtime ./cmd/actor-runtime
+
+FROM scratch
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /out/worker-actor-runtime /usr/local/bin/worker-actor-runtime
+EXPOSE 80
+ENTRYPOINT ["/usr/local/bin/worker-actor-runtime"]

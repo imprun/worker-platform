@@ -33,7 +33,10 @@ spec:
           properties:
             spec:
               type: object
-              required: [profile, image, trigger]
+              required: [profile, trigger]
+              x-kubernetes-validations:
+                - rule: "has(self.image) != has(self.appPackage)"
+                  message: Set exactly one of image and appPackage.
               properties:
                 profile:
                   type: string
@@ -44,6 +47,10 @@ spec:
                   type: string
                   maxLength: 512
                   pattern: '^[a-z0-9][a-z0-9./_-]*(:[0-9]+)?/[a-z0-9][a-z0-9./_-]*@sha256:[a-f0-9]{64}$'
+                appPackage:
+                  type: string
+                  maxLength: 592
+                  pattern: '^[a-z0-9][a-z0-9.-]*(:[1-9][0-9]{0,4})?/[a-z0-9][a-z0-9/._-]*@sha256:[a-f0-9]{64}$'
                 trigger:
                   type: object
                   required: [hostname, path, gateway, router]

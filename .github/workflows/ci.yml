@@ -33,7 +33,7 @@ jobs:
           go-version-file: go.mod
       - name: Check formatting
         run: |
-          files=$(gofmt -l cmd internal)
+          files=$(gofmt -l cmd internal examples/echo/app)
           if [ -n "$files" ]; then
             printf '%s\n' "$files"
             exit 1
@@ -48,6 +48,15 @@ jobs:
         run: |
           docker buildx build --load --file Dockerfile.controller --tag worker-platform-controller:ci .
           docker run --rm worker-platform-controller:ci -h
+      - name: Build the actor runtime and Echo app package
+        run: |
+          go build -trimpath -o "$RUNNER_TEMP/echo-app" ./examples/echo/app
+          "$RUNNER_TEMP/echo-app" --check
+          response=$(printf '%s' '{"input":{"message":"hello"}}' | "$RUNNER_TEMP/echo-app")
+          test "$response" = '{"message":"hello","version":"v1"}'
+          python3 scripts/build-app-package.py "$RUNNER_TEMP/echo-app" "$RUNNER_TEMP/echo-package"
+          docker buildx build --load --file Dockerfile.actor-runtime --tag worker-platform-runtime:ci .
+          docker run --rm worker-platform-runtime:ci -h
       - name: Check the Echo image and example script
         run: |
           sh -n examples/echo/run.sh

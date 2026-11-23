@@ -1,19 +1,19 @@
 # Worker Platform
 
-Kubernetes Gateway API로 버전이 고정된 OCI 워커를 호출하고 ATE에서 실행합니다.
+Kubernetes Gateway API로 워커를 호출하고 ATE에서 실행합니다. 공통 Actor 런타임 이미지와 OCI 앱 패키지를 독립적으로 버전 관리합니다. [앱 배포 구조](docs/architecture.md#공통-런타임의-앱-로드)
 
 [![CI](https://github.com/imprun/worker-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/imprun/worker-platform/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**현재 `main`**의 `worker-controller`는 `kubectl apply`로 등록한 v1alpha3 `HTTPWorker`와 `WorkerProfile`을 감시해 ATE에 직접 배포합니다. Worker 배정과 Actor 준비를 확인한 뒤 동기 `POST` HTTPRoute를 게시합니다. [컨트롤러 설치·업데이트·롤백](docs/ate-controller.md)
+`worker-controller`는 v1alpha3 `HTTPWorker.spec.appPackage`와 `WorkerProfile.spec.runtimeImage`를 하나의 리비전으로 묶어 ATE에 배포합니다. Worker 배정과 Actor의 `/readyz`를 확인한 뒤 동기 `POST` HTTPRoute를 게시합니다. 독립 이미지 워커에는 `HTTPWorker.spec.image`를 사용합니다. [컨트롤러 설치·업데이트·롤백](docs/ate-controller.md)
 
 `spec.jobEnabled`를 켠 앱에는 PostgreSQL 기반 단일 Job을 접수할 수 있습니다. 재시도는 처음 접수한 리비전을 사용하고 결과는 Run ID로 조회합니다. [Job 접수·재시도 예제](docs/job-api.md)
 
-이미지 빌드, ARM64 gVisor 풀, Gateway mTLS 설정, 실제 호출을 한 흐름으로 따라 할 수 있습니다. [Echo 전체 예제](examples/echo/)
+Echo는 공통 런타임 위에서 JSON을 처리하는 앱 패키지 예제입니다. ARM64 gVisor 풀에서 런타임을 고정하고 앱 패키지만 업데이트하거나 롤백할 수 있습니다. [Echo 앱 패키지 예제](examples/echo/README.md#공통-런타임으로-echo-패키지-배포)
 
 | 문서 | 내용 |
 | --- | --- |
-| [아키텍처](docs/architecture.md) | Gateway 호출 경로, ATE 정책, 리비전 배포와 롤백 |
+| [아키텍처](docs/architecture.md) | 공통 런타임과 앱 패키지, Gateway 호출, 리비전 배포와 롤백 |
 | [요구사항](docs/requirements.md) | 운영 범위 및 기능별 인수 기준 |
 | [단일 Job 실행 상세 설계](docs/job-execution-design.md) | API, 시도와 슬롯, 재시도, 사이트 세션과 운영 화면 |
 | [설계 검토와 검증 근거](docs/design-review.md) | 검토 결과, kagent·Testkube 소스, 출시 시험 |
@@ -44,7 +44,9 @@ Echo는 `{"message":"hello"}`를 반환합니다. `render`는 생성할 Kubernet
 
 ## 개발 클러스터에 Echo 배포
 
-예제 가이드대로 전용 개발 리소스와 인증서를 준비한 뒤 스크립트를 실행합니다. 스크립트는 이미지를 digest로 고정하고 직접 배포한 다음 Gateway에서 HTTP 200과 Echo JSON을 확인합니다. [개발계 준비와 정리](examples/echo/README.md)
+컨트롤러와 전용 개발계를 준비한 뒤 Echo 앱 패키지를 빌드하고 `HTTPWorker`로 배포합니다. [앱 빌드·배포·롤백](examples/echo/README.md#공통-런타임으로-echo-패키지-배포)
+
+독립 이미지로 ATE 호출 경로를 점검할 때는 아래 스크립트를 사용합니다. [개발계 준비와 정리](examples/echo/README.md#개발계-준비)
 
 ```sh
 ECHO_REPOSITORY=registry.example.test/workers/echo sh examples/echo/run.sh

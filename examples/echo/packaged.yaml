@@ -1,0 +1,40 @@
+apiVersion: workerplatform.imprun.dev/v1alpha3
+kind: WorkerProfile
+metadata:
+  name: echo-packaged-arm64
+  namespace: wp-echo-example
+spec:
+  atespace: wp-echo-example
+  workerPool:
+    name: echo-arm64-dev
+    namespace: ate-system
+  poolID: echo-arm64-dev
+  architecture: arm64
+  sandboxClass: gvisor
+  cpu: 20m
+  memory: 64Mi
+  runtimeImage: registry.example.test/workers/actor-runtime@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  egress:
+    - protocol: tlsPassthrough
+      hostname: packages.example.test
+      port: 443
+---
+apiVersion: workerplatform.imprun.dev/v1alpha3
+kind: HTTPWorker
+metadata:
+  name: echo
+  namespace: wp-echo-example
+spec:
+  profile: echo-packaged-arm64
+  appPackage: packages.example.test/workers/echo@sha256:2222222222222222222222222222222222222222222222222222222222222222
+  trigger:
+    hostname: echo.example.test
+    path: /invoke
+    gateway:
+      name: echo
+      namespace: wp-echo-example
+      sectionName: http
+    router:
+      name: wp-echo-example-router
+      namespace: ate-system
+      port: 443

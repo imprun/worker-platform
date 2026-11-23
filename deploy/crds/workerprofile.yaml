@@ -51,6 +51,14 @@ spec:
                 memory:
                   type: string
                   pattern: '^[1-9][0-9]{0,7}(Mi|Gi)$'
+                runtimeImage:
+                  type: string
+                  maxLength: 512
+                  pattern: '^[a-z0-9][a-z0-9./_-]*(:[0-9]+)?/[a-z0-9][a-z0-9./_-]*@sha256:[a-f0-9]{64}$'
+                appRegistryCA:
+                  type: string
+                  maxLength: 32768
+                  description: Optional public PEM trust bundle for the HTTPS app registry.
                 egress:
                   type: array
                   maxItems: 256

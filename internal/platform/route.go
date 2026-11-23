@@ -35,6 +35,18 @@ func (r Route) owns(other Route) bool {
 
 func buildRoute(w Worker, owner, target string) (Route, error) {
 	t := w.Spec.Trigger
+	filters := []any{map[string]any{
+		"type": "RequestHeaderModifier", "requestHeaderModifier": map[string]any{
+			"set": []map[string]string{{"name": "ate-target-actor", "value": target}},
+		},
+	}}
+	if w.Spec.AppPackage != "" && t.Path != "/invoke" {
+		filters = append(filters, map[string]any{
+			"type": "URLRewrite", "urlRewrite": map[string]any{
+				"path": map[string]string{"type": "ReplaceFullPath", "replaceFullPath": "/invoke"},
+			},
+		})
+	}
 	spec := map[string]any{
 		"parentRefs": []any{map[string]any{
 			"group": GatewayAPI, "kind": "Gateway", "name": t.Gateway.Name,
@@ -43,11 +55,7 @@ func buildRoute(w Worker, owner, target string) (Route, error) {
 		"hostnames": []string{t.Hostname},
 		"rules": []any{map[string]any{
 			"matches": []any{map[string]any{"method": "POST", "path": map[string]string{"type": "Exact", "value": t.Path}}},
-			"filters": []any{map[string]any{
-				"type": "RequestHeaderModifier", "requestHeaderModifier": map[string]any{
-					"set": []map[string]string{{"name": "ate-target-actor", "value": target}},
-				},
-			}},
+			"filters": filters,
 			"backendRefs": []any{map[string]any{
 				"group": "", "kind": "Service", "name": t.Router.Name,
 				"namespace": t.Router.Namespace, "port": t.Router.Port, "weight": 1,

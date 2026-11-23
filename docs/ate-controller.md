@@ -1,6 +1,6 @@
 # Kubernetes CRD로 ATE에 배포
 
-`worker-controller`는 적용된 `HTTPWorker`와 `WorkerProfile`을 감시한다. `HTTPWorker`에 이미지 digest와 호출 주소를, 같은 네임스페이스의 `WorkerProfile`에 Atespace·WorkerPool·CPU·메모리·egress 정책을 지정한다. 두 CRD의 API 버전은 `workerplatform.imprun.dev/v1alpha3`다. [HTTPWorker 예제](../examples/echo/httpworker.yaml) · [WorkerProfile 예제](../examples/echo/workerprofile.yaml)
+`worker-controller`는 적용된 `HTTPWorker`와 `WorkerProfile`을 감시한다. `HTTPWorker`는 호출 주소와 `spec.appPackage` 또는 `spec.image`를 지정한다. 같은 네임스페이스의 `WorkerProfile`은 Atespace·WorkerPool·CPU·메모리·egress 정책을 지정하며, 패키지 워커에는 `spec.runtimeImage`도 제공한다. 두 CRD의 API 버전은 `workerplatform.imprun.dev/v1alpha3`다. [공통 런타임과 앱 패키지](../examples/echo/README.md#공통-런타임으로-echo-패키지-배포)
 
 ```mermaid
 sequenceDiagram
@@ -70,7 +70,7 @@ k -n "$ns" rollout status deployment/worker-controller --timeout=90s
 
 ## 적용·업데이트·롤백
 
-`ECHO_IMAGE_V1`, `ECHO_IMAGE_V2`는 `/readyz`와 `POST /invoke`를 구현한 ARM64 이미지의 OCI digest 주소다. 검증할 때는 두 버전의 응답이 구분되는 앱을 사용한다.
+이 절은 `spec.image`를 사용하는 독립 이미지 예제다. `ECHO_IMAGE_V1`, `ECHO_IMAGE_V2`는 `/readyz`와 `POST /invoke`를 구현한 ARM64 이미지의 OCI digest 주소다. 두 버전의 응답이 구분되는 앱을 사용한다. [HTTPWorker](../examples/echo/httpworker.yaml) · [WorkerProfile](../examples/echo/workerprofile.yaml)
 
 ```sh
 apply_echo() {

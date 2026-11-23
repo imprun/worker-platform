@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/imprun/worker-platform/internal/apppackage"
 	"gopkg.in/yaml.v3"
 )
 
@@ -26,7 +27,8 @@ type ObjectName struct {
 
 type WorkerSpec struct {
 	Profile    string      `yaml:"profile" json:"profile"`
-	Image      string      `yaml:"image" json:"image"`
+	Image      string      `yaml:"image,omitempty" json:"image,omitempty"`
+	AppPackage string      `yaml:"appPackage,omitempty" json:"appPackage,omitempty"`
 	Trigger    HTTPTrigger `yaml:"trigger" json:"trigger"`
 	JobEnabled bool        `yaml:"jobEnabled,omitempty" json:"jobEnabled,omitempty"`
 }
@@ -91,8 +93,15 @@ func (w Worker) Validate() error {
 	if len(w.Metadata.Name) > 40 {
 		return errors.New("worker name must be at most 40 characters")
 	}
-	if !imagePattern.MatchString(w.Spec.Image) || len(w.Spec.Image) > 512 {
-		return errors.New("spec.image must be a repository reference pinned to a SHA-256 digest")
+	if (w.Spec.Image == "") == (w.Spec.AppPackage == "") {
+		return errors.New("set exactly one of spec.image and spec.appPackage")
+	}
+	if w.Spec.Image != "" {
+		if !imagePattern.MatchString(w.Spec.Image) || len(w.Spec.Image) > 512 {
+			return errors.New("spec.image must be a repository reference pinned to a SHA-256 digest")
+		}
+	} else if _, err := apppackage.ParseReference(w.Spec.AppPackage); err != nil {
+		return fmt.Errorf("spec.appPackage: %w", err)
 	}
 	if err := checkLabels(w.Spec.Profile); err != nil {
 		return fmt.Errorf("worker profile: %w", err)
