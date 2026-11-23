@@ -89,6 +89,8 @@ call_echo
 
 패키지는 `app.json`의 `contractVersion: v1`과 실행 가능한 `entrypoint`를 제공한다. 런타임은 진입점의 `--check`가 성공한 뒤 `/readyz`를 공개한다. 각 호출에서 진입점은 표준 입력의 `{"input":{"message":"echo-example"}}`을 처리하고 표준 출력에 `{"message":"echo-example","version":"v1"}`처럼 JSON 하나를 쓴다. Job 호출은 같은 입력에 `runId`, `attempt`, 필요한 경우 `siteSession`을 포함한다.
 
+같은 OCI 패키지로 단일 Job을 접수할 수 있다. Echo는 Job 결과에 `runId`와 `attempt`를 돌려준다. Worker 장애 재현용 입력 `waitSeconds`는 첫 Attempt만 최대 75초 대기시킨다. [Echo Job 설정과 재시도 검증](../../docs/job-api.md)
+
 시험을 마치면 포트포워드를 종료하고 아래 명령으로 컨트롤러를 중단한 뒤 소유한 배포 선언을 제거한다. 이어 예제 Atespace의 Actor와 ActorTemplate을 정리한다. [예제 리소스 정리 순서](#예제-정리)
 
 ```sh
