@@ -1,11 +1,15 @@
 package workerapps
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/imprun/worker-platform/internal/platform"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/dynamic/fake"
 )
 
 func TestDevelopmentDeployment(t *testing.T) {
@@ -58,6 +62,36 @@ func TestDevelopmentDeployment(t *testing.T) {
 	if _, err := target.Deployment(example.Metadata.Name, foreign, custom); err == nil {
 		t.Fatal("다른 프로젝트의 프로필을 승인했습니다")
 	}
+	t.Run("HTTPWorker 재시도와 업데이트", func(t *testing.T) {
+		ctx := t.Context()
+		client := fake.NewSimpleDynamicClient(runtime.NewScheme())
+		submit := func(version string, choice PackageChoice) error {
+			_, err := target.SubmitDevelopment(ctx, client, "org", "project", "app", version, profile, choice)
+			return err
+		}
+		created, err := target.SubmitDevelopment(ctx, client, "org", "project", "app", "", profile, custom)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := submit("", PackageChoice{Sample: "echo"}); err != nil {
+			t.Fatal(err)
+		}
+		replacement := PackageChoice{Repository: repository, Digest: "sha256:" + strings.Repeat("3", 64)}
+		if err := submit("", replacement); !errors.Is(err, ErrDeploymentChanged) {
+			t.Fatalf("배포 버전 누락 시 충돌을 예상했습니다: %v", err)
+		}
+		created.SetResourceVersion("42")
+		workers := client.Resource(workerResource).Namespace(target.Namespace)
+		if _, err := workers.Update(ctx, created, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := submit("41", replacement); !errors.Is(err, ErrDeploymentChanged) {
+			t.Fatalf("오래된 배포 버전의 충돌을 예상했습니다: %v", err)
+		}
+		if err := submit("42", replacement); err != nil {
+			t.Fatal(err)
+		}
+	})
 	target.ApprovedProfiles = nil
 	if _, err := target.Deployment(example.Metadata.Name, profile, custom); err == nil {
 		t.Fatal("승인 범위 밖의 프로필을 허용했습니다")
