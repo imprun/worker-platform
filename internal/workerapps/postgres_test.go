@@ -116,6 +116,13 @@ func TestWorkerAppPostgresHTTP(t *testing.T) {
 	}
 	path := collection + "/" + id + "/environments/development"
 	check(request("PUT", path, "read", "{}"), http.StatusForbidden)
+	targetResponse := request("GET", path+"/target", "read", "")
+	check(targetResponse, http.StatusOK)
+	var target LinkTarget
+	if err := json.Unmarshal(targetResponse.Body.Bytes(), &target); err != nil || target.AppID != id || target.URL != "" {
+		t.Fatalf("첫 배포 전 대상 상태가 다릅니다: %+v, %v", target, err)
+	}
+	check(request("GET", strings.Replace(path, "/first/", "/second/", 1)+"/target", "read", ""), http.StatusNotFound)
 	check(request("GET", strings.Replace(path, "/first/", "/second/", 1), "read", ""), http.StatusNotFound)
 	deployments := make(chan *httptest.ResponseRecorder, 2)
 	for range 2 {
@@ -137,5 +144,17 @@ func TestWorkerAppPostgresHTTP(t *testing.T) {
 	var status DevelopmentStatus
 	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil || status.LatestAttempt.State != "queued" || status.Active != nil {
 		t.Fatalf("최초 배포 상태가 예상과 다릅니다: %+v, %v", status, err)
+	}
+	resource.Object["status"] = map[string]any{
+		"active": map[string]any{"revision": "v1", "generation": int64(1)},
+	}
+	if _, err := kube.Resource(workerResource).Namespace(namespace).UpdateStatus(ctx, resource, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	targetResponse = request("GET", path+"/target", "read", "")
+	check(targetResponse, http.StatusOK)
+	if err := json.Unmarshal(targetResponse.Body.Bytes(), &target); err != nil ||
+		target.URL != "https://"+id+".workers.example.test/invoke" || target.Revision != "v1" {
+		t.Fatalf("활성 앱 대상이 예상과 다릅니다: %+v, %v", target, err)
 	}
 }
