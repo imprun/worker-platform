@@ -13,6 +13,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+var ErrRouteRecoveryUnconfirmed = errors.New("이전 HTTPRoute 복구를 확인하지 못했습니다")
+
 type ATECluster interface {
 	Read(context.Context, ObjectName) (*Route, error)
 	Publish(context.Context, Route, *Route) error
@@ -86,10 +88,10 @@ func (d ATEDeployment) Deploy(ctx context.Context, w Worker, p WorkerProfile) (A
 		}
 	}
 	if err := d.Cluster.Publish(ctx, plan.Route, before); err != nil {
-		return ATEDeploymentResult{}, fmt.Errorf("publish HTTPRoute: %w", err)
+		return ATEDeploymentResult{}, errors.Join(fmt.Errorf("publish HTTPRoute: %w", err), d.restorePreviousRoute(ctx, plan.Route, before))
 	}
 	if err := d.awaitRoute(ctx, plan.Route, w.Spec.Trigger.Gateway); err != nil {
-		return ATEDeploymentResult{}, err
+		return ATEDeploymentResult{}, errors.Join(err, d.restorePreviousRoute(ctx, plan.Route, before))
 	}
 	result := ATEDeploymentResult{
 		Revision: plan.Revision, Atespace: ref.GetAtespace(), Actor: ref.GetName(), ActorUID: uid,
@@ -100,6 +102,36 @@ func (d ATEDeployment) Deploy(ctx context.Context, w Worker, p WorkerProfile) (A
 		result.Job, err = newJobRevision(plan, templateUID, p)
 	}
 	return result, err
+}
+
+// restorePreviousRoute는 실패한 시도가 마지막으로 변경한 라우트만 복구한다.
+func (d ATEDeployment) restorePreviousRoute(ctx context.Context, candidate Route, previous *Route) error {
+	if previous == nil {
+		return nil
+	}
+	delta, err := routePatch(candidate, previous)
+	if err != nil || len(delta) == 0 {
+		return err
+	}
+	// 준비 제한 시간이 만료된 뒤에도 라우트 복구가 필요하다.
+	restore, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	current, err := d.Cluster.Read(restore, candidate.Metadata.ObjectName)
+	if err != nil {
+		return fmt.Errorf("%w: 복구 전 HTTPRoute 조회 실패: %w", ErrRouteRecoveryUnconfirmed, err)
+	}
+	if current == nil || current.Metadata.UID != previous.Metadata.UID ||
+		current.Metadata.Generation != previous.Metadata.Generation+1 || !candidate.owns(*current) {
+		return nil
+	}
+	delta, err = routePatch(candidate, current)
+	if err != nil || len(delta) != 0 {
+		return err
+	}
+	if err := d.Cluster.Publish(restore, *previous, current); err != nil {
+		return fmt.Errorf("%w: 이전 활성 HTTPRoute 복구 실패: %w", ErrRouteRecoveryUnconfirmed, err)
+	}
+	return nil
 }
 
 func (d ATEDeployment) plan(w Worker, p WorkerProfile) (ATEPlan, error) {

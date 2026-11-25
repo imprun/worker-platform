@@ -226,7 +226,11 @@ func (c Controller) reconcile(ctx context.Context, name string) error {
 		return inputErr
 	}
 	if err != nil {
-		return errors.Join(err, c.record(ctx, worker, profile, "DeploymentPending", err.Error(), nil))
+		reason := "DeploymentPending"
+		if errors.Is(err, platform.ErrRouteRecoveryUnconfirmed) {
+			reason = "RouteRecoveryUnconfirmed"
+		}
+		return errors.Join(err, c.record(ctx, worker, profile, reason, err.Error(), nil))
 	}
 	if result.Job != nil && c.jobs != nil {
 		record, cancel := context.WithTimeout(ctx, 8*time.Second)

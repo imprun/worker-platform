@@ -53,9 +53,9 @@ func (target DevelopmentTarget) SubmitDevelopment(
 		desired.SetName(name)
 		desired.SetNamespace(worker.Metadata.Namespace)
 		desired.SetAnnotations(map[string]string{appOwnerAnnotation: owner})
-		created, err := workers.Create(ctx, desired, metav1.CreateOptions{})
-		if !apierrors.IsAlreadyExists(err) {
-			return created, err
+		created, createErr := workers.Create(ctx, desired, metav1.CreateOptions{})
+		if !apierrors.IsAlreadyExists(createErr) {
+			return created, createErr
 		}
 		current, err = workers.Get(ctx, name, metav1.GetOptions{})
 	}
