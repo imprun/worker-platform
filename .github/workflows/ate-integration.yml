@@ -9,6 +9,10 @@ on:
         description: Base commit for the integration change check
         required: true
         type: string
+      api_sha:
+        description: API Platform 제품 검증에 사용할 전체 SHA
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -48,3 +52,25 @@ jobs:
         with:
           go-version-file: go.mod
       - run: python3 scripts/ate_integration.py --run "$BASE_REF" "$GITHUB_SHA"
+
+  worker-app-product:
+    name: 워커 앱 개발 Gateway 검증
+    needs: changes
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      vars.ATE_INTEGRATION_ENABLED == 'true' &&
+      ((needs.changes.outputs.required == 'true' && vars.ATE_PRODUCT_API_SHA != '') ||
+        (github.event_name == 'workflow_dispatch' && inputs.api_sha != ''))
+    runs-on: [self-hosted, linux, ate-integration]
+    timeout-minutes: 30
+    concurrency:
+      group: worker-platform-ate-integration
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: 인증된 Gateway 왕복과 리비전 전환 검증
+        env:
+          PRODUCT_API_SHA: ${{ inputs.api_sha || vars.ATE_PRODUCT_API_SHA }}
+        run: python3 scripts/worker_app_integration.py "$GITHUB_SHA" "$PRODUCT_API_SHA"

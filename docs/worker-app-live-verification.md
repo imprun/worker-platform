@@ -29,3 +29,24 @@
 | API 담당자 | 다중 연산 OpenAPI 초안을 작성하다 워커 앱을 배포하고 원래 초안으로 돌아와 한 POST 연산을 연결한 다음 개발 Gateway를 호출한다. | 복귀 전후 입력과 파일 유지, 외부 경로 선택, 배포와 게시 구분, 첫 응답까지 시간, 활성 리비전 식별 여부 |
 
 참여자별 과제 완료 여부, 소요 시간, 도움을 요청한 단계, 활성 버전 식별 결과를 #4에 남긴다. 자동 실행 결과와 사용자 관찰은 별도로 기록한다.
+
+## GitHub Actions 실행
+
+워커 제품 검증은 기존 `ATE integration`의 별도 작업이다. 워커 `main`에서 기존 `ATE_INTEGRATION_ENABLED=true` 조건을 사용한다. 워커 변경으로 자동 실행할 때는 저장소 변수 `ATE_PRODUCT_API_SHA`에 함께 검증할 API Platform의 전체 SHA를 설정한다. API Platform만 변경된 경우에는 워커 `main`에서 수동 실행하고 `base`에는 현재 워커 `main` SHA, `api_sha`에는 새 API Platform 전체 SHA를 입력한다. 워커 변경 감지가 비어도 제품 작업을 실행한다. 러너 공유 잠금으로 기존 ATE 스모크와 동시에 실행하지 않는다.
+
+Actions는 기존 self-hosted ATE 러너에서 이미 준비된 테스트 서비스를 검증한다. 검토한 두 커밋을 빌드한 뒤 전용 `wp-product-verification` 네임스페이스에 배포한다. Run API, 워커 컨트롤러, API Platform, 개발 Gateway Deployment에는 `spec.template.metadata.annotations.imprun.dev/source-sha`와 이미지 digest를 고정한다. API Gateway 등록의 ID·버전 및 HTTPS 엔드포인트도 테스트 구성과 일치해야 한다. 일반 워커 Echo 스모크의 `wp-echo-example` 리소스는 제품 실행에서 사용하지 않는다.
+
+러너에 `KUBE_CONTEXT`, `ATE_TOKEN_FILE`, 그리고 아래 JSON 파일의 경로인 `ATE_PRODUCT_FIXTURE_FILE`을 제공한다. 파일 자체에는 토큰을 담지 않는다.
+
+| 키 | 값 |
+| --- | --- |
+| `cluster_uid`, `namespace_uid`, `pool_uid`, `atespace_uid` | 격리 테스트 클러스터, 네임스페이스, WorkerPool, Atespace의 확인된 UID |
+| `worker_workload`, `controller_workload`, `api_workload`, `gateway_workload` | 각각 Run API, 워커 컨트롤러, API Platform, 개발 Gateway Deployment 이름 |
+| `worker_url`, `api_url`, `gateway_url` | 각 서비스의 검증된 HTTPS origin |
+| `profile`, `pool`, `runtime_image`, `gateway`, `gateway_version` | 전용 ARM64 gVisor 프로필 이름, 풀 이름, 런타임 이미지 digest 참조, 개발 Gateway 핸들과 버전 |
+| `project`, `organization_id`, `project_id` | 신규 테스트 전용 프로젝트 핸들과 인증된 조직·프로젝트의 고정 ID |
+| `management_token_file`, `gateway_credential_file`, 선택 `gateway_header` | 프로젝트 관리 Bearer 토큰 파일, 테스트 Gateway 호출 자격 파일, 기본 `Authorization` 헤더 |
+| `pg_service_file`, `pg_service`, `pg_database` | 워커 앱 테스트 DB로만 연결하는 PostgreSQL 서비스 파일·이름·데이터베이스명 |
+| `package_v1`, `package_failure`, `package_v2` | 사용자 방식으로 게시한 서로 다른 고정 OCI 참조. v1·v2는 동일 JSON을 반환하고 실패 후보는 시작 확인에서 실패해야 한다. 정상 v2는 준비 중 v1 호출을 확인할 만큼 시작 확인을 지연한다. |
+
+성공 프리플라이트는 기존 Actor, ActorTemplate, HTTPWorker, HTTPRoute와 워커 앱 등록이 없는 전용 공간을 요구한다. Actor 런타임과 패키지는 JSON Echo PR #5와 응답 digest 헤더 변경을 포함해 빌드한다. 제품 작업의 검증 요약에는 실제 Gateway HTTP 결과와 두 SHA가 포함된다. 시작 전 오류나 정리 실패도 작업을 실패 처리한다. 실패 후 재실행 전에 남은 테스트 소유 리소스를 확인한다.
