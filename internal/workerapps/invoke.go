@@ -42,7 +42,7 @@ func (s *Service) Invoke(ctx context.Context, scope ProjectScope, id string, inp
 	if err != nil {
 		return InvocationResult{}, err
 	}
-	if status.Active == nil {
+	if status.Active == nil || status.LatestAttempt.Reason == "RouteRecoveryUnconfirmed" {
 		return InvocationResult{}, ErrDeploymentNotReady
 	}
 
