@@ -129,6 +129,59 @@ func TestATEDirectDeploymentGatesRouteAndReusesRevisions(t *testing.T) {
 	}
 }
 
+func TestATEFailedGatewayConfirmationRestoresActiveRoute(t *testing.T) {
+	w, p := ateExample(t)
+	control := &ateFixture{
+		templates: map[string]*ate.ActorTemplate{},
+		actors:    map[string]*ate.Actor{},
+		policies:  map[string]*ate.EgressPolicy{},
+	}
+	cluster := &ateClusterFixture{gateway: w.Spec.Trigger.Gateway}
+	deployment := ATEDeployment{
+		Control: control, Cluster: cluster, PollInterval: time.Millisecond,
+		Ready: func(context.Context, *ate.ObjectRef) (bool, error) { return true, nil },
+	}
+	if _, err := deployment.Deploy(t.Context(), w, p); err != nil {
+		t.Fatal(err)
+	}
+	previous := string(cluster.route.Spec)
+	w.Spec.Image = strings.Replace(w.Spec.Image, strings.Repeat("1", 64), strings.Repeat("2", 64), 1)
+	confirmationErr := errors.New("Gateway 확인 실패")
+	cluster.programmedError = confirmationErr
+	if _, err := deployment.Deploy(t.Context(), w, p); !errors.Is(err, confirmationErr) {
+		t.Fatalf("Gateway 확인 오류를 예상했습니다: %v", err)
+	}
+	if string(cluster.route.Spec) != previous || cluster.publications != 3 {
+		t.Fatalf("이전 배포 복구가 수행되지 않았습니다: %d", cluster.publications)
+	}
+}
+
+func TestATERouteRestoreDoesNotOverwriteLaterPublication(t *testing.T) {
+	w, p := ateExample(t)
+	previous, err := BuildATEPlan(w, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous.Route.Metadata.UID = "same-route"
+	previous.Route.Metadata.Generation = 1
+	w.Spec.Image = strings.Replace(w.Spec.Image, strings.Repeat("1", 64), strings.Repeat("2", 64), 1)
+	candidate, err := BuildATEPlan(w, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	competing := candidate.Route
+	competing.Metadata.UID = "same-route"
+	competing.Metadata.Generation = 3
+	cluster := &ateClusterFixture{route: &competing}
+	deployment := ATEDeployment{Cluster: cluster}
+	if err := deployment.restorePreviousRoute(t.Context(), candidate.Route, &previous.Route); err != nil {
+		t.Fatal(err)
+	}
+	if cluster.publications != 0 {
+		t.Fatal("실패한 배포의 복구가 이후 세대를 덮어썼습니다")
+	}
+}
+
 func TestHTTPWorkerUIDIsolatesRevisions(t *testing.T) {
 	w, p := ateExample(t)
 	local, err := BuildATEPlan(w, p)
@@ -256,14 +309,15 @@ func (f *ateFixture) ResumeActor(_ context.Context, r *ate.ResumeActorRequest, _
 }
 
 type ateClusterFixture struct {
-	gateway      GatewayRef
-	route        *Route
-	publications int
+	gateway         GatewayRef
+	route           *Route
+	publications    int
+	programmedError error
 }
 
 func (*ateClusterFixture) CheckWorkerPool(context.Context, WorkerProfile) error { return nil }
-func (*ateClusterFixture) GatewayProgrammed(context.Context, GatewayRef) (bool, error) {
-	return true, nil
+func (f *ateClusterFixture) GatewayProgrammed(context.Context, GatewayRef) (bool, error) {
+	return f.programmedError == nil, f.programmedError
 }
 func (f *ateClusterFixture) Read(context.Context, ObjectName) (*Route, error) { return f.route, nil }
 func (f *ateClusterFixture) Publish(_ context.Context, route Route, _ *Route) error {

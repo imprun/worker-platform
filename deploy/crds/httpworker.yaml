@@ -101,6 +101,7 @@ spec:
                 observedGeneration:
                   type: integer
                   format: int64
+                observedAppPackage: {type: string, maxLength: 592}
                 observedProfile:
                   type: object
                   required: [name, uid, generation]
@@ -121,6 +122,7 @@ spec:
                         uid: {type: string}
                         generation: {type: integer, format: int64}
                     revision: {type: string}
+                    appPackage: {type: string, maxLength: 592}
                     atespace: {type: string}
                     actor: {type: string}
                     actorUID: {type: string}

@@ -31,6 +31,7 @@ func run(ctx context.Context) error {
 	tokenFile := flag.String("job-token-file", "", "file containing the namespace Job bearer token")
 	siteKeyFile := flag.String("job-site-key-file", "", "base64 file containing a 32-byte site session encryption key")
 	providerFile := flag.String("job-reauth-token-file", "", "file containing the private site authentication provider bearer token")
+	appsFile := flag.String("worker-app-config-file", "", "워커 앱 프로젝트·개발 라우팅 설정 JSON 파일")
 	flag.Parse()
 	if *namespace == "" || *address == "" || *dsnFile == "" || *tokenFile == "" {
 		return errors.New("Run API requires -namespace, -job-listen, -job-dsn-file and -job-token-file")
@@ -62,6 +63,17 @@ func run(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 	mux.Handle("/", jobs.Handler(store, token, providerToken))
+	if *appsFile != "" {
+		init, cancel := context.WithTimeout(ctx, 15*time.Second)
+		handler, closeApps, err := openWorkerApps(init, *appsFile, *dsnFile, *namespace)
+		cancel()
+		if err != nil {
+			return err
+		}
+		defer closeApps()
+		mux.Handle("/projects/", handler)
+	}
+
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		probe, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()

@@ -24,6 +24,7 @@ type publishedRevision struct {
 	Generation int64           `json:"generation"`
 	Profile    profileRevision `json:"profile"`
 	Revision   string          `json:"revision"`
+	AppPackage string          `json:"appPackage,omitempty"`
 	Atespace   string          `json:"atespace"`
 	Actor      string          `json:"actor"`
 	ActorUID   string          `json:"actorUID"`
@@ -34,6 +35,7 @@ type publishedRevision struct {
 
 type workerStatus struct {
 	ObservedGeneration int64              `json:"observedGeneration"`
+	ObservedAppPackage string             `json:"observedAppPackage,omitempty"`
 	ObservedProfile    *profileRevision   `json:"observedProfile,omitempty"`
 	Active             *publishedRevision `json:"active,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions"`
@@ -95,9 +97,11 @@ func (c Controller) record(ctx context.Context, used, profile *unstructured.Unst
 	if profile != nil {
 		observed = &profileRevision{Name: profile.GetName(), UID: profile.GetUID(), Generation: profile.GetGeneration()}
 	}
-	if reason == "Preparing" && status.ObservedGeneration == used.GetGeneration() && reflect.DeepEqual(status.ObservedProfile, observed) {
-		return nil
+	appPackage, _, err := unstructured.NestedString(used.Object, "spec", "appPackage")
+	if err != nil && reason != "InvalidWorker" {
+		return err
 	}
+	status.ObservedAppPackage = appPackage
 	status.ObservedGeneration = used.GetGeneration()
 	status.ObservedProfile = observed
 	condition := metav1.Condition{
@@ -106,7 +110,7 @@ func (c Controller) record(ctx context.Context, used, profile *unstructured.Unst
 	if result != nil {
 		condition.Status = metav1.ConditionTrue
 		status.Active = &publishedRevision{
-			Generation: status.ObservedGeneration, Profile: *observed, Revision: result.Revision,
+			Generation: status.ObservedGeneration, Profile: *observed, Revision: result.Revision, AppPackage: appPackage,
 			Atespace: result.Atespace, Actor: result.Actor, ActorUID: result.ActorUID,
 			Worker: result.Worker, WorkerPod: result.WorkerPod, Route: result.Route,
 		}
