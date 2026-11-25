@@ -36,7 +36,7 @@ func (target DevelopmentTarget) SubmitDevelopment(
 	}
 	worker, err := target.Deployment(name, profile, choice)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 	spec, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&worker.Spec)
 	if err != nil {
