@@ -11,6 +11,7 @@ import (
 var (
 	ErrUnauthorized = errors.New("로그인이 필요합니다")
 	ErrForbidden    = errors.New("이 프로젝트에 대한 권한이 없습니다")
+	ErrInvalidJSON  = errors.New("64 KiB 이내의 올바른 JSON을 입력하세요")
 	ErrInvalidInput = errors.New("앱 이름, 승인된 프로필과 앱 패키지를 확인하세요")
 )
 
@@ -44,6 +45,7 @@ type AppService interface {
 	List(context.Context, ProjectScope) ([]App, error)
 	Status(context.Context, ProjectScope, string) (DevelopmentStatus, error)
 	Deploy(context.Context, ProjectScope, string, DeployRequest) (DevelopmentStatus, error)
+	Invoke(context.Context, ProjectScope, string, json.RawMessage) (InvocationResult, error)
 }
 
 func Handler(access ProjectAccess, service AppService) http.Handler {
@@ -77,6 +79,15 @@ func Handler(access ProjectAccess, service AppService) http.Handler {
 		status, err := service.Deploy(r.Context(), scope, r.PathValue("app"), request)
 		return respond(w, http.StatusAccepted, status, err)
 	}))
+	mux.HandleFunc("POST "+development+"/invoke", scoped(access, true, func(w http.ResponseWriter, r *http.Request, scope ProjectScope) error {
+		input, err := io.ReadAll(http.MaxBytesReader(w, r.Body, invocationLimit))
+		if err != nil || !json.Valid(input) {
+			return ErrInvalidJSON
+		}
+		result, err := service.Invoke(r.Context(), scope, r.PathValue("app"), input)
+		return respond(w, http.StatusOK, result, err)
+	}))
+
 	return mux
 }
 
@@ -103,6 +114,9 @@ func scoped(access ProjectAccess, write bool, handle func(http.ResponseWriter, *
 			{ErrDeploymentNotFound, http.StatusNotFound},
 			{ErrDeploymentChanged, http.StatusConflict},
 			{ErrInvalidInput, http.StatusBadRequest},
+			{ErrInvalidJSON, http.StatusBadRequest},
+			{ErrDeploymentNotReady, http.StatusConflict},
+			{ErrInvocation, http.StatusBadGateway},
 		} {
 			if errors.Is(err, expected.err) {
 				code, message = expected.code, expected.err.Error()

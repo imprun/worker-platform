@@ -64,3 +64,19 @@ Echo를 등록할 때는 `package`에 `{"sample":"echo"}`를 보낸다. 앱 이�
 ```
 
 `latestAttempt.state`는 `queued`, `preparing`, `failed`, `ready` 중 하나다. 첫 게시 전에는 `active`가 생략된다. 상태의 `ready`는 컨트롤러가 게시를 확인했다는 의미다. Gateway 인증과 실제 JSON 왕복은 호출 기록에서 확인한다.
+
+## 콘솔 JSON 테스트
+
+`POST /projects/demo/worker-apps/{app}/environments/development/invoke`에 64 KiB 이내 JSON 값을 보낸다. 프로젝트 변경 권한과 활성 배포가 필요하다. Run API는 설정된 내부 개발 Gateway의 HTTPS 앱 호스트만 사용한다. 개발 앱 Gateway는 Run API에서 접근할 수 있는 내부 리스너로 구성한다.
+
+Echo 요청과 응답 예시는 다음과 같다.
+
+```json
+{"hello":"world"}
+```
+
+```json
+{"status":200,"body":{"hello":"world"}}
+```
+
+`status`는 앱에서 받은 HTTP 상태다. Echo는 JSON을 Actor 로컬 `requests.jsonl`에 남긴다. 호출 응답은 앱에서 받은 값이며 로그 파일의 별도 백업이나 API Platform Gateway의 배포·인증 상태를 나타내지 않는다.
