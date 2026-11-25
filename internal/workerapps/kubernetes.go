@@ -30,11 +30,10 @@ func (target DevelopmentTarget) SubmitDevelopment(
 	ctx context.Context, client dynamic.Interface, orgID, projectID, appID, expectedVersion string,
 	profile platform.WorkerProfile, choice PackageChoice,
 ) (*unstructured.Unstructured, error) {
-	if orgID == "" || projectID == "" || appID == "" {
-		return nil, errors.New("등록된 조직, 프로젝트와 앱이 필요합니다")
+	name, owner, err := deploymentIdentity(orgID, projectID, appID)
+	if err != nil {
+		return nil, err
 	}
-	owner := sha256.Sum256(fmt.Appendf(nil, "%q/%q/%q", orgID, projectID, appID))
-	name := fmt.Sprintf("app-%x", owner[:18])
 	worker, err := target.Deployment(name, profile, choice)
 	if err != nil {
 		return nil, err
@@ -53,7 +52,7 @@ func (target DevelopmentTarget) SubmitDevelopment(
 		}}
 		desired.SetName(name)
 		desired.SetNamespace(worker.Metadata.Namespace)
-		desired.SetAnnotations(map[string]string{appOwnerAnnotation: fmt.Sprintf("%x", owner)})
+		desired.SetAnnotations(map[string]string{appOwnerAnnotation: owner})
 		created, err := workers.Create(ctx, desired, metav1.CreateOptions{})
 		if !apierrors.IsAlreadyExists(err) {
 			return created, err
@@ -66,7 +65,7 @@ func (target DevelopmentTarget) SubmitDevelopment(
 	if err != nil {
 		return nil, err
 	}
-	if current.GetDeletionTimestamp() != nil || current.GetAnnotations()[appOwnerAnnotation] != fmt.Sprintf("%x", owner) {
+	if !ownsDeployment(current, owner) {
 		return nil, ErrDeploymentChanged
 	}
 	before, _, err := unstructured.NestedMap(current.Object, "spec")
@@ -85,4 +84,16 @@ func (target DevelopmentTarget) SubmitDevelopment(
 		return nil, ErrDeploymentChanged
 	}
 	return updated, err
+}
+
+func deploymentIdentity(orgID, projectID, appID string) (name, owner string, err error) {
+	if orgID == "" || projectID == "" || appID == "" {
+		return "", "", errors.New("등록된 조직, 프로젝트와 앱이 필요합니다")
+	}
+	sum := sha256.Sum256(fmt.Appendf(nil, "%q/%q/%q", orgID, projectID, appID))
+	return fmt.Sprintf("app-%x", sum[:18]), fmt.Sprintf("%x", sum), nil
+}
+
+func ownsDeployment(worker *unstructured.Unstructured, owner string) bool {
+	return worker.GetDeletionTimestamp() == nil && worker.GetAnnotations()[appOwnerAnnotation] == owner
 }

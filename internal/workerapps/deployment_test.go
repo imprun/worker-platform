@@ -8,6 +8,7 @@ import (
 
 	"github.com/imprun/worker-platform/internal/platform"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic/fake"
 )
@@ -91,6 +92,44 @@ func TestDevelopmentDeployment(t *testing.T) {
 		if err := submit("42", replacement); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := target.ReadDevelopment(ctx, client, "org", "another-project", "app"); !errors.Is(err, ErrDeploymentNotFound) {
+			t.Fatalf("다른 프로젝트의 배포 조회를 거부해야 합니다: %v", err)
+		}
+		current, err := workers.Get(ctx, created.GetName(), metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		current.SetGeneration(2)
+		current.Object["status"] = map[string]any{
+			"observedGeneration": int64(2), "observedAppPackage": repository + "@" + replacement.Digest,
+			"active": map[string]any{"generation": int64(1), "revision": "v1", "appPackage": repository + "@" + digest},
+			"conditions": []any{map[string]any{
+				"type": "Ready", "status": "False", "observedGeneration": int64(2),
+				"reason": "DeploymentPending", "lastTransitionTime": "2026-11-25T00:00:00Z",
+			}},
+		}
+		if _, err := workers.Update(ctx, current, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := target.ReadDevelopment(ctx, client, "org", "project", "app")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.AppID != "app" || got.ProjectID != "project" || got.Environment != "development" ||
+			got.Operation != (HTTPOperation{Method: "POST", Path: "/invoke"}) ||
+			got.Active == nil || got.Active.AppPackage != repository+"@"+digest ||
+			got.LatestAttempt.State != "failed" || got.LatestAttempt.AppPackage != repository+"@"+replacement.Digest {
+			t.Fatalf("활성 배포와 실패한 시도의 응답을 확인하세요: %+v", got)
+		}
+		unstructured.RemoveNestedField(current.Object, "status")
+		if _, err := workers.Update(ctx, current, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		got, err = target.ReadDevelopment(ctx, client, "org", "project", "app")
+		if err != nil || got.Active != nil || got.LatestAttempt.State != "queued" || got.LatestAttempt.Generation != 2 {
+			t.Fatalf("첫 상태 기록 전 조회 결과가 다릅니다: %+v, %v", got, err)
+		}
+
 	})
 	target.ApprovedProfiles = nil
 	if _, err := target.Deployment(example.Metadata.Name, profile, custom); err == nil {
