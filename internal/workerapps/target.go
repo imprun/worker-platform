@@ -36,7 +36,7 @@ func (s *Service) LinkTarget(ctx context.Context, scope ProjectScope, id string)
 	if err != nil {
 		return LinkTarget{}, err
 	}
-	if status.Active != nil {
+	if status.Active != nil && status.LatestAttempt.Reason != "RouteRecoveryUnconfirmed" {
 		endpoint := url.URL{Scheme: "https", Host: target.Trigger.Hostname, Path: link.Operation.Path}
 		link.URL = endpoint.String()
 		link.Revision = status.Active.Revision
