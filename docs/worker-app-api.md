@@ -1,6 +1,23 @@
 # 개발 워커 앱 API
 
-앱 서버에는 인증된 요청에서 조직과 프로젝트를 결정하는 권한 검사, 프로젝트별 승인 프로필과 앱별 개발 호스트 설정, PostgreSQL 및 범위가 제한된 Kubernetes 클라이언트가 필요하다. 아래 경로와 JSON은 워커 앱 HTTP 처리 코드의 계약이며, 서버에 연결한 뒤 사용할 수 있다.
+앱 서버에는 인증된 요청에서 조직과 프로젝트를 결정하는 권한 검사, 프로젝트별 승인 프로필과 앱별 개발 호스트 설정, PostgreSQL 및 범위가 제한된 Kubernetes 클라이언트가 필요하다. Run API의 `-worker-app-config-file` 플래그로 경로를 활성화한다. API Platform은 권한 검사를 활성화하고 `worker-app-access` 경로를 제공해야 한다. 워커 API는 해당 HTTPS 서버에 사용자 Bearer 토큰을 전달하여 조직·프로젝트 범위를 확인한다.
+
+같은 네임스페이스에 `deploy/run-api/worker-app-rbac.yaml`을 적용한다. 활성화한 Run API Deployment에 `serviceAccountName: worker-app-api`, `automountServiceAccountToken: true` 및 설정 파일 볼륨을 지정한다. 설정의 예는 다음과 같다.
+
+```json
+{
+  "platformURL": "https://platform.example.test",
+  "developmentDomain": "workers.dev.example.test",
+  "echoPackage": "packages.example.test/demo/echo@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "gateway": {"name":"worker-dev","namespace":"worker-dev","sectionName":"https"},
+  "router": {"name":"actor-router","namespace":"ate-system","port":443},
+  "projects": [
+    {"organizationId":"org-uuid","projectId":"project-uuid","approvedProfiles":["arm64-dev"]}
+  ]
+}
+```
+
+프로젝트는 API Platform의 고정 조직·프로젝트 ID로 설정한다. 개발 Gateway의 리스너, DNS와 TLS 인증서는 앱 ID를 하위 도메인으로 사용하는 호스트를 처리해야 한다.
 
 ## 등록과 배포
 
