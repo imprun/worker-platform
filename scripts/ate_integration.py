@@ -12,16 +12,22 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 GO_BOUNDARIES = (
     "cmd/actor-runtime/",
+    "cmd/run-api/",
     "cmd/worker-controller/",
     "cmd/workerctl/",
     "internal/apppackage/",
     "internal/ateclient/",
     "internal/controller/",
     "internal/platform/",
+    "internal/workerapps/",
 )
 BUILD_BOUNDARIES = {
     "Dockerfile.actor-runtime",
     "Dockerfile.controller",
+    "Dockerfile.run-api",
+    ".github/workflows/ate-integration.yml",
+    "scripts/ate_integration.py",
+    "scripts/worker_app_integration.py",
     "scripts/build-app-package.py",
 }
 ATE_DEPENDENCY = re.compile(
@@ -46,6 +52,8 @@ def changes(base, head):
         if path in BUILD_BOUNDARIES:
             selected.add(path)
         elif path.endswith(".go") and not path.endswith("_test.go") and path.startswith(GO_BOUNDARIES):
+            selected.add(path)
+        elif path.endswith(".sql") and path.startswith("internal/workerapps/"):
             selected.add(path)
         elif path.endswith((".yaml", ".yml")) and path.startswith(("deploy/", "examples/echo/")):
             selected.add(path)
