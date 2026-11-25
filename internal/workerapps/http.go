@@ -46,6 +46,7 @@ type AppService interface {
 	List(context.Context, ProjectScope) ([]App, error)
 	Status(context.Context, ProjectScope, string) (DevelopmentStatus, error)
 	Deploy(context.Context, ProjectScope, string, DeployRequest) (DevelopmentStatus, error)
+	LinkTarget(context.Context, ProjectScope, string) (LinkTarget, error)
 	Invoke(context.Context, ProjectScope, string, json.RawMessage) (InvocationResult, error)
 }
 
@@ -87,6 +88,10 @@ func Handler(access ProjectAccess, service AppService) http.Handler {
 		}
 		result, err := service.Invoke(r.Context(), scope, r.PathValue("app"), input)
 		return respond(w, http.StatusOK, result, err)
+	}))
+	mux.HandleFunc("GET "+development+"/target", scoped(access, false, func(w http.ResponseWriter, r *http.Request, scope ProjectScope) error {
+		target, err := service.LinkTarget(r.Context(), scope, r.PathValue("app"))
+		return respond(w, http.StatusOK, target, err)
 	}))
 
 	return mux

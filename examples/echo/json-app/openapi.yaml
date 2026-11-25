@@ -1,0 +1,26 @@
+openapi: 3.0.3
+info:
+  title: JSON Echo
+  version: 1.0.0
+paths:
+  /invoke:
+    post:
+      operationId: echoJSON
+      summary: 요청 JSON을 기록하고 같은 값을 반환한다
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {}
+            example: {hello: world}
+      responses:
+        '200':
+          description: Actor가 요청을 기록하고 반환한 JSON
+          content:
+            application/json:
+              schema: {}
+              example: {hello: world}
+        '400':
+          description: JSON 형식 또는 입력 크기 오류
+        '502':
+          description: 앱 실행 또는 기록 실패
