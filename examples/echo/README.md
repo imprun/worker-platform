@@ -1,8 +1,37 @@
 # ATE Echo 예제
 
-Echo 앱은 JSON의 `message`를 읽고 `message`와 `version`을 반환한다. 공통 Actor 런타임이 OCI 레지스트리에서 Echo를 로드하고 HTTP 요청을 앱에 전달한다. Gateway는 mTLS로 ATE Router에 연결한다. [Echo 앱 소스](app/main.go) · [공통 런타임](../../cmd/actor-runtime/main.go) · [앱 배포 설계](../../docs/architecture.md#공통-런타임의-앱-로드)
+## 요청 JSON 기록과 응답
+
+저장소 루트에서 아래 한 줄을 실행한다. Go가 공통 Actor 런타임의 HTTP 핸들러와 [JSON Echo 앱](json-app/main.go)을 임시로 실행하고, 요청·응답·기록을 출력한 뒤 종료한다.
+
+```sh
+go test -count=1 -v -run '^TestInvokeRecordsAndReturnsJSON$' ./cmd/actor-runtime
+```
+
+확인할 출력은 세 줄이다.
+
+```text
+POST /invoke {"hello":"world"}
+HTTP 200 {"hello":"world"}
+requests.jsonl {"hello":"world"}
+```
+
+앱은 작업 디렉터리의 `requests.jsonl`에 요청마다 한 줄을 추가하고 같은 JSON 값을 응답한다. JSON 공백과 이스케이프 표기는 정규화될 수 있다. 응답 한도는 64 KiB다.
+
+### 개발계 Gateway에 요청 보내기
+
+JSON Echo를 개발계에서 실행하려면 아래 배포 절차의 Go 빌드 대상을 `./examples/echo/json-app`으로 지정하고 OCI 패키지 digest를 전용 `HTTPWorker.spec.appPackage`에 넣는다. Gateway를 로컬 8080번으로 열면 아래 명령에서 본문을 바꿔 보낼 수 있다. [배포 명세](packaged.yaml)
+
+```sh
+curl -fsS -H 'Host: echo.example.test' -H 'Content-Type: application/json' \
+  --data '{"hello":"world"}' http://127.0.0.1:8080/invoke
+```
+
+기록은 각 Actor의 앱 작업 디렉터리에 남는다. 이 예제에는 시험용 JSON을 보낸다.
 
 ## 공통 런타임으로 Echo 패키지 배포
+
+배포·롤백 검증에 쓰는 [Echo 앱](app/main.go)은 JSON의 `message`를 읽고 `message`와 `version`을 반환한다. 공통 Actor 런타임이 OCI 레지스트리에서 앱을 로드하고 Gateway는 mTLS로 ATE Router에 연결한다. [공통 런타임](../../cmd/actor-runtime/main.go) · [앱 배포 설계](../../docs/architecture.md#공통-런타임의-앱-로드)
 
 연동 변경용 실환경 스모크는 이 예제와 공통 런타임을 후보 커밋에서 빌드하고, 두 digest를 고정해 `workerctl`로 배포한다. [스모크 설정과 실행](../../docs/testing.md#ate-실환경-테스트)
 
