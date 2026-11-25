@@ -7,10 +7,12 @@ import (
 	"testing"
 
 	"github.com/imprun/worker-platform/internal/platform"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic/fake"
+	kubetesting "k8s.io/client-go/testing"
 )
 
 func TestDevelopmentDeployment(t *testing.T) {
@@ -67,13 +69,21 @@ func TestDevelopmentDeployment(t *testing.T) {
 		ctx := t.Context()
 		client := fake.NewSimpleDynamicClient(runtime.NewScheme())
 		submit := func(version string, choice PackageChoice) error {
-			_, err := target.SubmitDevelopment(ctx, client, "org", "project", "app", version, profile, choice)
+			_, err := target.SubmitDevelopment(ctx, client, "org", "project", "app", version, profile, choice, false)
 			return err
 		}
-		created, err := target.SubmitDevelopment(ctx, client, "org", "project", "app", "", profile, custom)
+		created, err := target.SubmitDevelopment(ctx, client, "org", "project", "app", "", profile, custom, false)
 		if err != nil {
 			t.Fatal(err)
 		}
+		firstRead := true
+		client.PrependReactor("get", workerResource.Resource, func(kubetesting.Action) (bool, runtime.Object, error) {
+			if firstRead {
+				firstRead = false
+				return true, nil, apierrors.NewNotFound(workerResource.GroupResource(), created.GetName())
+			}
+			return false, nil, nil
+		})
 		if err := submit("", PackageChoice{Sample: "echo"}); err != nil {
 			t.Fatal(err)
 		}
@@ -92,6 +102,13 @@ func TestDevelopmentDeployment(t *testing.T) {
 		if err := submit("42", replacement); err != nil {
 			t.Fatal(err)
 		}
+		for range 2 {
+			retried, err := target.SubmitDevelopment(ctx, client, "org", "project", "app", "42", profile, replacement, true)
+			if err != nil || retried.GetAnnotations()[platform.DeploymentRetryAnnotation] != "42" {
+				t.Fatalf("동일 리비전 재시도 표시가 저장돼야 합니다: %v", err)
+			}
+		}
+
 		if _, err := target.ReadDevelopment(ctx, client, "org", "another-project", "app"); !errors.Is(err, ErrDeploymentNotFound) {
 			t.Fatalf("다른 프로젝트의 배포 조회를 거부해야 합니다: %v", err)
 		}

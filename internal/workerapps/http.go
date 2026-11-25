@@ -36,6 +36,7 @@ type App struct {
 }
 
 type DeployRequest struct {
+	Retry           bool           `json:"retry,omitempty"`
 	ResourceVersion string         `json:"resourceVersion,omitempty"`
 	Package         *PackageChoice `json:"package,omitempty"`
 }

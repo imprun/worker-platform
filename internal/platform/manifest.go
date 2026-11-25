@@ -12,6 +12,7 @@ import (
 )
 
 const WorkerVersion = "workerplatform.imprun.dev/v1alpha2"
+const DeploymentRetryAnnotation = "workerplatform.imprun.dev/deployment-retry"
 
 type Worker struct {
 	APIVersion string     `yaml:"apiVersion"`

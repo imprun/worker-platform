@@ -65,6 +65,8 @@ Echo를 등록할 때는 `package`에 `{"sample":"echo"}`를 보낸다. 앱 이�
 
 `latestAttempt.state`는 `queued`, `preparing`, `failed`, `ready` 중 하나다. 첫 게시 전에는 `active`가 생략된다. 상태의 `ready`는 컨트롤러가 게시를 확인했다는 의미다. Gateway 인증과 실제 JSON 왕복은 호출 기록에서 확인한다.
 
+같은 패키지의 재시도를 즉시 요청하려면 `resourceVersion`과 현재 시도한 `package`를 그대로 보내고 `retry: true`를 추가한다. 같은 리소스 버전의 중복 재시도는 하나로 처리한다. 컨트롤러는 기존 배포와 Actor 리비전을 재사용하고 준비 점검을 다시 실행한다.
+
 ## 콘솔 JSON 테스트
 
 `POST /projects/demo/worker-apps/{app}/environments/development/invoke`에 64 KiB 이내 JSON 값을 보낸다. 프로젝트 변경 권한과 활성 배포가 필요하다. Run API는 설정된 내부 개발 Gateway의 HTTPS 앱 호스트만 사용한다. 개발 앱 Gateway는 Run API에서 접근할 수 있는 내부 리스너로 구성한다.
