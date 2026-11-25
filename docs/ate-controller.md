@@ -121,3 +121,17 @@ Kubernetes v1.36.6, Gateway API v1.6.1, agentgateway v1.7.0, ATE v1.0.0의 별�
 | v1 | CRD 1세대가 게시된 후 v1 응답을 받았다. |
 | v2 | 후보가 `RESUMING`인 동안 v1 응답과 기존 라우트 대상을 31회 확인했다. 후보가 `RUNNING`이고 준비 확인을 통과한 뒤 같은 URL에서 v2 응답을 받았다. |
 | v1 롤백 | HTTPRoute UID가 유지됐고 첫 v1 Actor UID가 복원됐다. Atespace에는 같은 두 Actor만 남았다. |
+
+### OCI 앱의 배포 상태
+
+`status.active.revision`과 `status.active.appPackage`는 컨트롤러가 Actor 준비와 HTTPRoute 수락을 확인한 마지막 배포를 식별한다. `status.observedGeneration`, `status.observedAppPackage`, `Ready` 조건의 사유는 최근 처리한 배포 시도를 나타낸다. 클라이언트는 `metadata.generation`이 관찰된 세대보다 높으면 새 요청이 아직 컨트롤러에 반영되기 전으로 표시할 수 있다.
+
+| 배포 단계 | 활성 패키지 | 최근 시도와 Ready 사유 |
+| --- | --- | --- |
+| 최초 준비 | 없음 | v1 · `Preparing` |
+| 최초 게시 | v1 | v1 · `Published` |
+| 업데이트 준비 | v1 | v2 · `Preparing` |
+| 업데이트 시도 실패, 재시도 가능 | v1 | v2 · `DeploymentPending` |
+| 업데이트 게시 | v2 | v2 · `Published` |
+
+패키지 필드는 이미지 기반 워커와 기존 상태 레코드에서 비어 있을 수 있다. 활성 리비전은 컨트롤러의 게시 확인 결과이며, 인증된 개발 Gateway 요청에서 실제로 응답한 리비전은 호출 결과로 검증한다.

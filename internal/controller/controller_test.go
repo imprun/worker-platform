@@ -95,3 +95,64 @@ func example(t *testing.T, name string) *unstructured.Unstructured {
 	}
 	return &obj
 }
+
+func TestPackageRolloutStatus(t *testing.T) {
+	const v1 = "packages.example.test/echo@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	const v2 = "packages.example.test/echo@sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	worker := example(t, "httpworker.yaml")
+	profile := example(t, "workerprofile.yaml")
+	client := fake.NewSimpleDynamicClient(runtime.NewScheme(), worker, profile)
+	c := Controller{workers: client.Resource(workersGVR).Namespace(worker.GetNamespace())}
+	ctx := t.Context()
+	update := func(generation int64, pkg string) {
+		t.Helper()
+		current, err := c.workers.Get(ctx, worker.GetName(), metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		current.SetGeneration(generation)
+		unstructured.RemoveNestedField(current.Object, "spec", "image")
+		if err := unstructured.SetNestedField(current.Object, pkg, "spec", "appPackage"); err != nil {
+			t.Fatal(err)
+		}
+		worker, err = c.workers.Update(ctx, current, metav1.UpdateOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(reason, observed, active string, result *platform.ATEDeploymentResult) {
+		t.Helper()
+		if err := c.record(ctx, worker, profile, reason, reason, result); err != nil {
+			t.Fatal(err)
+		}
+		current, err := c.workers.Get(ctx, worker.GetName(), metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _, err := unstructured.NestedMap(current.Object, "status")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got workerStatus
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(data, &got); err != nil {
+			t.Fatal(err)
+		}
+		var activePackage string
+		if got.Active != nil {
+			activePackage = got.Active.AppPackage
+		}
+		if got.ObservedAppPackage != observed || activePackage != active ||
+			got.ObservedGeneration != worker.GetGeneration() || len(got.Conditions) != 1 || got.Conditions[0].Reason != reason {
+			t.Fatalf("배포 상태가 예상과 다릅니다: %+v", got)
+		}
+	}
+
+	update(1, v1)
+	check("Preparing", v1, "", nil)
+	check("Published", v1, v1, &platform.ATEDeploymentResult{Revision: "v1"})
+	update(2, v2)
+	check("Preparing", v2, v1, nil)
+	check("DeploymentPending", v2, v1, nil)
+	check("Preparing", v2, v1, nil)
+	check("Published", v2, v2, &platform.ATEDeploymentResult{Revision: "v2"})
+}
