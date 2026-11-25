@@ -65,6 +65,8 @@ Echo를 등록할 때는 `package`에 `{"sample":"echo"}`를 보낸다. 앱 이�
 
 `latestAttempt.state`는 `queued`, `preparing`, `failed`, `ready` 중 하나다. 첫 게시 전에는 `active`가 생략된다. 상태의 `ready`는 컨트롤러가 게시를 확인했다는 의미다. Gateway 인증과 실제 JSON 왕복은 호출 기록에서 확인한다.
 
+같은 패키지의 재시도를 즉시 요청하려면 `resourceVersion`과 현재 시도한 `package`를 그대로 보내고 `retry: true`를 추가한다. 같은 리소스 버전의 중복 재시도는 하나로 처리한다. 컨트롤러는 기존 배포와 Actor 리비전을 재사용하고 준비 점검을 다시 실행한다.
+
 ## API 연산 연결 대상 조회
 
 `GET /projects/demo/worker-apps/{app}/environments/development/target`는 프로젝트에 등록된 앱의 `appId`, `projectId`, `environment`, `operation`을 반환한다. 같은 프로젝트의 등록 앱은 첫 배포 전에도 조회할 수 있다. 활성 배포가 준비되면 응답에 내부 HTTPS `url`과 활성 `revision`이 추가된다. 다른 프로젝트의 앱 ID는 `404`를 반환한다.
