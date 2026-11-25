@@ -28,7 +28,7 @@ var ErrDeploymentChanged = errors.New("배포 상태가 변경되었습니다. �
 // expectedVersion은 업데이트 전 조회한 HTTPWorker의 resourceVersion이다. 최초 배포에는 빈 값을 사용한다.
 func (target DevelopmentTarget) SubmitDevelopment(
 	ctx context.Context, client dynamic.Interface, orgID, projectID, appID, expectedVersion string,
-	profile platform.WorkerProfile, choice PackageChoice,
+	profile platform.WorkerProfile, choice PackageChoice, retry bool,
 ) (*unstructured.Unstructured, error) {
 	name, owner, err := deploymentIdentity(orgID, projectID, appID)
 	if err != nil {
@@ -44,7 +44,7 @@ func (target DevelopmentTarget) SubmitDevelopment(
 	}
 	workers := client.Resource(workerResource).Namespace(worker.Metadata.Namespace)
 	current, err := workers.Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) && expectedVersion == "" {
+	if apierrors.IsNotFound(err) && expectedVersion == "" && !retry {
 		desired := &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": workerResource.GroupVersion().String(),
 			"kind":       worker.Kind,
@@ -72,13 +72,20 @@ func (target DevelopmentTarget) SubmitDevelopment(
 	if err != nil {
 		return nil, err
 	}
-	if reflect.DeepEqual(before, spec) {
+	unchanged := reflect.DeepEqual(before, spec)
+	annotations := current.GetAnnotations()
+	if unchanged && (!retry || expectedVersion != "" && annotations[platform.DeploymentRetryAnnotation] == expectedVersion) {
 		return current, nil
 	}
-	if expectedVersion == "" || current.GetResourceVersion() != expectedVersion {
+	if expectedVersion == "" || current.GetResourceVersion() != expectedVersion || retry && !unchanged {
 		return nil, ErrDeploymentChanged
 	}
-	current.Object["spec"] = spec
+	if retry {
+		annotations[platform.DeploymentRetryAnnotation] = expectedVersion
+		current.SetAnnotations(annotations)
+	} else {
+		current.Object["spec"] = spec
+	}
 	updated, err := workers.Update(ctx, current, metav1.UpdateOptions{})
 	if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
 		return nil, ErrDeploymentChanged

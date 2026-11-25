@@ -127,7 +127,8 @@ func registerEvents(informer cache.SharedIndexInformer, enqueue, deleted func(an
 		AddFunc: enqueue,
 		UpdateFunc: func(previous, current any) {
 			old, new := previous.(*unstructured.Unstructured), current.(*unstructured.Unstructured)
-			if !sameRevision(old, new) || !new.GetDeletionTimestamp().Equal(old.GetDeletionTimestamp()) {
+			if !sameRevision(old, new) || !new.GetDeletionTimestamp().Equal(old.GetDeletionTimestamp()) ||
+				old.GetAnnotations()[platform.DeploymentRetryAnnotation] != new.GetAnnotations()[platform.DeploymentRetryAnnotation] {
 				enqueue(current)
 			}
 		},

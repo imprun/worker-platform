@@ -112,7 +112,7 @@ func (s *Service) Deploy(ctx context.Context, scope ProjectScope, id string, req
 	if request.Package != nil {
 		choice = *request.Package
 	}
-	if _, err := target.SubmitDevelopment(ctx, s.kube, scope.OrganizationID, scope.ProjectID, id, request.ResourceVersion, profile, choice); err != nil {
+	if _, err := target.SubmitDevelopment(ctx, s.kube, scope.OrganizationID, scope.ProjectID, id, request.ResourceVersion, profile, choice, request.Retry); err != nil {
 		return DevelopmentStatus{}, err
 	}
 	return target.ReadDevelopment(ctx, s.kube, scope.OrganizationID, scope.ProjectID, id)
