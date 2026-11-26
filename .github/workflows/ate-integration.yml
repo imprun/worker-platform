@@ -3,6 +3,15 @@ name: ATE integration
 on:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - .github/workflows/ate-integration.yml
+      - Dockerfile.actor-runtime
+      - Dockerfile.controller
+      - Dockerfile.run-api
+      - examples/echo/build-verification-packages.sh
+      - scripts/build-app-package.py
+      - scripts/verify-worker-oci.py
   workflow_dispatch:
     inputs:
       base:
@@ -22,7 +31,10 @@ permissions:
   contents: read
 
 env:
-  BASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.base || github.event.before }}
+  BASE_REF: >-
+    ${{ github.event_name == 'workflow_dispatch' && inputs.base ||
+        github.event_name == 'pull_request' && github.event.pull_request.base.sha ||
+        github.event.before }}
 
 jobs:
   changes:
@@ -68,9 +80,10 @@ jobs:
     needs: changes
     if: >-
       github.repository == 'imprun/worker-platform' &&
-      github.ref == 'refs/heads/main' &&
-      (needs.changes.outputs.required == 'true' ||
-        (github.event_name == 'workflow_dispatch' && inputs.build_worker_artifacts))
+      ((github.event_name == 'pull_request' && needs.changes.outputs.required == 'true') ||
+        (github.ref == 'refs/heads/main' &&
+          (needs.changes.outputs.required == 'true' ||
+            (github.event_name == 'workflow_dispatch' && inputs.build_worker_artifacts))))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -113,7 +126,8 @@ jobs:
             cat "$out/images.txt" "$out/packages.txt"
             printf '```\n'
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      - if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: worker-app-arm64-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/worker-app-oci
