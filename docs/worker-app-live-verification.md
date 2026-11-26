@@ -52,10 +52,9 @@ Actions의 워커 제품 작업은 Kubernetes의 기존 ARC 러너 세트를 사
 | `profile`, `pool`, `runtime_image`, `gateway`, `gateway_version` | 전용 ARM64 gVisor 프로필 이름, 풀 이름, 런타임 이미지 digest 참조, 개발 Gateway 핸들과 버전 |
 | `project`, `organization_id`, `project_id` | 신규 테스트 전용 프로젝트 핸들과 인증된 조직·프로젝트의 고정 ID |
 | `management_token_file`, `gateway_credential_file`, 선택 `gateway_header` | 프로젝트 관리 Bearer 토큰 파일, 테스트 Gateway 호출 자격 파일, 기본 `Authorization` 헤더 |
-| `pg_service_file`, `pg_service`, `pg_database` | 워커 앱 테스트 DB로만 연결하는 PostgreSQL 서비스 파일·이름·데이터베이스명 |
 | `package_v1`, `package_failure`, `package_v2` | 사용자 방식으로 게시한 서로 다른 고정 OCI 참조. v1·v2는 동일 JSON을 반환하고 실패 후보는 시작 확인에서 실패해야 한다. 정상 v2는 준비 중 v1 호출을 확인할 만큼 시작 확인을 지연한다. |
 
-실행 전 검사는 기존 Actor, ActorTemplate, HTTPWorker, HTTPRoute와 워커 앱 등록이 없는 전용 공간을 요구한다. Actor 런타임과 패키지는 JSON Echo PR #5와 응답 digest 헤더 변경을 포함해 빌드한다. 개발 Gateway는 이 테스트 경로에 인증을 요구해야 한다. 제품 작업의 검증 요약에는 실제 Gateway HTTP 결과와 두 SHA가 포함된다. 시작 전 오류나 정리 실패도 작업을 실패 처리한다. 정리할 때 이 실행에서 만든 Gateway 배포를 해제한다. 제어 서버의 해제 승인과 테스트 URL의 404 응답을 확인한 뒤 테스트 API와 워커 앱을 삭제한다. 해제에 실패하면 해당 앱을 유지하며, 실패 후 재실행 전에 남은 테스트 소유 리소스를 확인한다.
+실행 전 검사는 기존 Actor, ActorTemplate, HTTPWorker, HTTPRoute와 워커 앱 등록이 없는 전용 공간을 요구한다. Actor 런타임과 패키지는 JSON Echo PR #5와 응답 digest 헤더 변경을 포함해 빌드한다. 개발 Gateway는 이 테스트 경로에 인증을 요구해야 한다. 제품 작업의 검증 요약에는 실제 Gateway HTTP 결과와 두 SHA가 포함된다. 시작 전 오류나 정리 실패도 작업을 실패 처리한다. 정리할 때 이 실행에서 만든 Gateway 배포를 해제한다. 제어 서버의 해제 승인과 테스트 URL의 404 응답을 확인한 뒤 테스트 API를 삭제한다. 제품의 워커 앱 삭제 API에 다시 요청해 HTTP 204를 확인하고, 프로젝트 목록과 개발 연결 대상에서 해당 앱이 사라졌는지 검증한다. 삭제한 앱의 이력은 제품에 남는다. 러너는 PostgreSQL에 직접 접속할 필요가 없다. 해제에 실패하면 해당 앱을 유지하며, 실패 후 재실행 전에 남은 테스트 소유 리소스를 확인한다.
 
 검토된 소스에 JSON Echo PR #5의 코드가 포함되면 `PACKAGE_REPOSITORY`와 실행별 고유 `PACKAGE_TAG_PREFIX`를 설정하고 `sh examples/echo/build-verification-packages.sh`로 세 ARM64 앱 패키지를 게시할 수 있다. 게시한 레지스트리가 Actor 주소와 다를 때만 `PACKAGE_PUSH_REPOSITORY`를 설정한다. 스크립트는 레지스트리가 반환한 digest를 OCI 패키지의 digest와 대조하고 러너 설정에 넣을 세 참조를 출력한다. 실패 후보는 시작 확인을 실패시키고 정상 v2는 기본 8초 동안 시작 확인을 지연한다.
 
