@@ -11,6 +11,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 GO_BOUNDARIES = (
+    "examples/echo/json-app/",
     "cmd/actor-runtime/",
     "cmd/run-api/",
     "cmd/worker-controller/",
@@ -22,6 +23,7 @@ GO_BOUNDARIES = (
     "internal/workerapps/",
 )
 BUILD_BOUNDARIES = {
+    "examples/echo/build-verification-packages.sh",
     "Dockerfile.actor-runtime",
     "Dockerfile.controller",
     "Dockerfile.run-api",

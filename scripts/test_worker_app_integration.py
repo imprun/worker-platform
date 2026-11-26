@@ -1,3 +1,6 @@
+from email import policy
+from email.parser import BytesParser
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,14 +32,39 @@ class ProductIntegrationTest(unittest.TestCase):
             test = smoke.Verification(config, "1" * 40, "2" * 40)
             calls = []
             active = config["package_v1"]
+            spec = None
+            deployed = False
 
             def response(method, url, headers, value=None, allowed=(200,)):
+                nonlocal spec, deployed
                 calls.append((method, url, value))
                 if url == test.collection:
                     return 201, {"id": test.app, "projectId": config["project_id"]}, {}
+                if url == test.development + "/invoke":
+                    return 200, {"status": 200, "body": value}, {}
+                if url == test.api + "/rest-apis/import-openapi":
+                    form = BytesParser(policy=policy.default).parsebytes(
+                        f"Content-Type: {headers['Content-Type']}\r\n\r\n".encode() + value
+                    )
+                    fields = {part.get_param("name", header="content-disposition"): part.get_payload(decode=True)
+                              for part in form.iter_parts()}
+                    spec = json.loads(fields["file"])
+                    self.assertEqual("verifyEcho", spec["paths"]["/verify"]["post"]["operationId"])
+                    self.assertEqual([{
+                        "path": "/verify",
+                        "workerApp": {"appId": test.app, "environment": "development", "method": "POST", "path": "/invoke"},
+                    }], json.loads(fields["workerAppConnections"]))
+                    return 201, {"id": fields["id"].decode(), "description": fields["description"].decode(),
+                                 "projectId": fields["projectId"].decode()}, {}
+                if url == test.rest + "/openapi":
+                    return 200, {"content": json.dumps(spec)}, {}
+                if url == test.connections:
+                    return 200, [{"apiId": test.slug, "method": "POST", "path": "/verify",
+                                  "configured": True, "deployed": deployed}], {}
                 if url.endswith("/deployments"):
                     return 201, {"deploymentId": "test-deployment"}, {}
                 if url.endswith("/deployments/test-deployment"):
+                    deployed = True
                     return 200, {"status": "DEPLOYED"}, {}
                 if url == test.public_url and headers:
                     return 200, value, {smoke.DIGEST_HEADER: active.split("@")[1]}
@@ -58,12 +86,19 @@ class ProductIntegrationTest(unittest.TestCase):
             self.assertEqual(["ready", "failed", "preparing", "ready", "ready"], [state[0] for state in states])
             requests = [value for _, url, value in calls if url == test.public_url and "stage" in value]
             self.assertEqual(5, len(requests))
-            self.assertEqual(5, sum("HTTP 200" in note for note in test.notes))
+            self.assertEqual(6, sum("HTTP 200" in note for note in test.notes))
             with patch.object(test, "call", side_effect=lambda _method, _url, _headers, data: (
                 200, data, {smoke.DIGEST_HEADER: "sha256:" + "4" * 64},
             )):
                 with self.assertRaisesRegex(ValueError, "실제 응답 패키지 digest 불일치"):
                     test.expect_echo("리비전 불일치", config["package_v1"])
+            test.may_have_app = False
+            with patch.object(test, "call", return_value=(200, {
+                "id": test.slug, "description": "다른 작업에서 만든 API", "projectId": config["project"],
+            }, {})) as call:
+                with self.assertRaisesRegex(ValueError, "정리하지 못했습니다"):
+                    test.cleanup()
+                self.assertEqual(["GET"], [request.args[0] for request in call.call_args_list])
 
     def test_requires_origin_without_userinfo_or_path(self):
         self.assertEqual("https://example.test", smoke.endpoint("https://example.test/"))

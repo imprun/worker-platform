@@ -40,13 +40,17 @@ jobs:
           fi
       - run: go vet ./...
       - name: Go unit and contract tests
-        run: go test -race -skip '^TestPostgres' ./...
+        run: go test -race -skip '^(TestPostgres|TestWorkerAppPostgresHTTP)' ./...
       - name: PostgreSQL reservation, migration, and Job tests
         run: go test -race -count=1 -run '^TestPostgres' -v ./internal/jobs
         env:
-          WORKER_JOB_TEST_DSN: postgres://jobs:ci-jobs@127.0.0.1:${{ job.services.postgres.ports[5432] }}/jobs?sslmode=disable
-      - name: Check the ATE integration gate
-        run: python3 -B -m unittest scripts/test_ate_integration.py
+          WORKER_JOB_TEST_DSN: postgres://jobs:ci-jobs@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/jobs?sslmode=disable
+      - name: PostgreSQL 워커 앱 HTTP 테스트
+        run: go test -race -count=1 -run '^TestWorkerAppPostgresHTTP$' -v ./internal/workerapps
+        env:
+          WORKER_APP_TEST_DSN: postgres://jobs:ci-jobs@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/jobs?sslmode=disable
+      - name: ATE 실행 조건과 OpenAPI 검증 시나리오 검사
+        run: python3 -B -m unittest scripts/test_ate_integration.py scripts/test_worker_app_integration.py
       - name: Render the direct ATE example
         run: go run ./cmd/workerctl render -f examples/echo/ate-worker.yaml -profile examples/echo/ate-profile.yaml > "$RUNNER_TEMP/echo-ate-plan.txt"
       - name: Check the controller image
@@ -75,6 +79,7 @@ jobs:
       - name: Check the Echo image and example script
         run: |
           sh -n examples/echo/run.sh
+          sh -n examples/echo/build-verification-packages.sh
           docker buildx build --load --file Dockerfile.echo --tag worker-platform-echo:ci .
           container=$(docker run --detach --rm --publish 127.0.0.1::80 worker-platform-echo:ci)
           trap 'docker stop "$container" >/dev/null' EXIT

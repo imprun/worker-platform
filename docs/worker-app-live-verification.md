@@ -4,14 +4,14 @@
 
 ## 현재 검증 근거
 
-- 개발 Kubernetes API `v1.36.6`에 지정 TCP CONNECT 프록시를 통해 접속했다. kubeconfig CA와 서버 이름 검증을 유지했다. `ate-system`은 조회됐고 `wp-echo-example`, `HTTPWorker`, `WorkerProfile`은 당시 `404`를 반환했다. 클러스터는 변경하지 않았다.
+- 개발 Kubernetes API `v1.36.6`에 지정 TCP CONNECT 프록시를 통해 접속했다. kubeconfig CA와 서버 이름 검증을 유지했다. `ate-system`과 `HTTPRoute` 정의는 조회됐고, `wp-echo-example`, `HTTPWorker`, `WorkerProfile`은 `404`를 반환했다. 클러스터는 변경하지 않았다.
 - [Echo PR #5](https://github.com/imprun/worker-platform/pull/5)에서 로컬 `POST /invoke`의 HTTP 200, 원본과 같은 JSON 값, Actor 로컬 `requests.jsonl` 기록을 확인했다. PR의 JSON Echo 패키지가 개발계에 올라가야 동일 계약을 실환경에서 재검증할 수 있다.
 - 격리된 PostgreSQL을 사용한 로컬 HTTP 테스트에서 동시 등록·배포, 타 프로젝트 조회 거부, 승인 프로필 제한을 확인했다. Kubernetes 클라이언트는 테스트 대역이었다.
 - 두 저장소를 함께 배포한 GitHub Actions 실행, 인증된 개발 Gateway 호출과 사용자 관찰 결과는 아직 없다.
 
 ## 자동 실행에서 남길 항목
 
-1. 같은 프로젝트의 게시 OCI 패키지를 v1으로 배포한다. 개발 API의 고정 외부 POST 경로를 워커 앱의 `POST /invoke`에 연결하고 개발 Gateway가 배포를 승인할 때까지 기다린다.
+1. 같은 프로젝트의 게시 OCI 패키지를 v1으로 배포한다. OpenAPI 문서의 외부 `POST /verify`를 워커 앱의 `POST /invoke`에 연결해 가져온다. 저장된 명세와 워커 앱 영향 목록을 조회한 뒤 개발 Gateway에 배포하고 영향 목록에 배포가 표시되는지 확인한다.
 2. 허가된 호출자에게 발급한 테스트 자격으로 외부 URL에 JSON을 보내 HTTP 상태와 응답 값을 확인한다. 워커 패키지가 v1임은 런타임이 검증한 `X-Imprun-Worker-Package-Digest` 응답 헤더로 확인한다. 연결 등록 응답의 상태값만으로 호출 성공을 판정하지 않는다.
 3. 시작 준비에서 실패하는 새 digest를 제출한다. 최근 시도 실패와 활성 v1을 조회하고 같은 URL에서 실제 v1 응답을 확인한다. 준비가 늦은 정상 v2를 제출해 준비 중 v1 응답과 Ready 후 v2 응답을 각각 확인한다.
 4. 동일한 URL과 API 배포를 유지하면서 v1 digest를 다시 제출한다. HTTP 200, Echo JSON과 실제 v1 digest를 대조한다.
@@ -49,4 +49,18 @@ Actions는 기존 self-hosted ATE 러너에서 이미 준비된 테스트 서비
 | `pg_service_file`, `pg_service`, `pg_database` | 워커 앱 테스트 DB로만 연결하는 PostgreSQL 서비스 파일·이름·데이터베이스명 |
 | `package_v1`, `package_failure`, `package_v2` | 사용자 방식으로 게시한 서로 다른 고정 OCI 참조. v1·v2는 동일 JSON을 반환하고 실패 후보는 시작 확인에서 실패해야 한다. 정상 v2는 준비 중 v1 호출을 확인할 만큼 시작 확인을 지연한다. |
 
-성공 프리플라이트는 기존 Actor, ActorTemplate, HTTPWorker, HTTPRoute와 워커 앱 등록이 없는 전용 공간을 요구한다. Actor 런타임과 패키지는 JSON Echo PR #5와 응답 digest 헤더 변경을 포함해 빌드한다. 제품 작업의 검증 요약에는 실제 Gateway HTTP 결과와 두 SHA가 포함된다. 시작 전 오류나 정리 실패도 작업을 실패 처리한다. 실패 후 재실행 전에 남은 테스트 소유 리소스를 확인한다.
+실행 전 검사는 기존 Actor, ActorTemplate, HTTPWorker, HTTPRoute와 워커 앱 등록이 없는 전용 공간을 요구한다. Actor 런타임과 패키지는 JSON Echo PR #5와 응답 digest 헤더 변경을 포함해 빌드한다. 개발 Gateway는 이 테스트 경로에 인증을 요구해야 한다. 제품 작업의 검증 요약에는 실제 Gateway HTTP 결과와 두 SHA가 포함된다. 시작 전 오류나 정리 실패도 작업을 실패 처리한다. 실패 후 재실행 전에 남은 테스트 소유 리소스를 확인한다.
+
+검토된 소스에 JSON Echo PR #5의 코드가 포함되면 `PACKAGE_REPOSITORY`와 실행별 고유 `PACKAGE_TAG_PREFIX`를 설정하고 `sh examples/echo/build-verification-packages.sh`로 세 ARM64 앱 패키지를 게시할 수 있다. 게시한 레지스트리가 Actor 주소와 다를 때만 `PACKAGE_PUSH_REPOSITORY`를 설정한다. 스크립트는 레지스트리가 반환한 digest를 OCI 패키지의 digest와 대조하고 러너 설정에 넣을 세 참조를 출력한다. 실패 후보는 시작 확인을 실패시키고 정상 v2는 기본 8초 동안 시작 확인을 지연한다.
+
+## 격리된 로컬 Kubernetes API 검증
+
+임시 Kubernetes API 1.35.0과 PostgreSQL 17을 시작하고 저장소의 `HTTPWorker`·`WorkerProfile` CRD를 적용했다. Run API의 워커 앱 처리기를 루프백 HTTP 서버로 열어 등록·동시 최초 배포, 승인 프로필 제한, 프로젝트 분리, v2 제출 뒤 같은 요청 재시도와 오래된 버전의 다른 요청 거부를 확인했다. 실제 API 서버에서 생성 충돌을 처리할 때 첫 404가 남는 문제를 재현해 수정했다. 새 리소스 세대가 기록되어도 마지막 활성 v1이 조회됐다. 임시 API 서버·DB와 제한 권한의 연결 파일은 테스트 종료 시 정리했다.
+
+이 시험에서 워커 준비 상태는 테스트가 CRD 상태에 기록했고, 프로젝트 권한은 테스트용 검사가 처리했다. 실제 ATE Actor 및 인증된 개발 Gateway 검증은 Actions 실행에서 확인한다.
+
+같은 테스트를 실행하려면 PostgreSQL 테스트 DSN을 `WORKER_APP_TEST_DSN`에 지정한다. 선택적으로 `WORKER_APP_TEST_KUBE_FILE`에 소유한 임시 kube-apiserver의 연결 JSON 파일을 지정한다. JSON은 `Host`, `CAData`, `CertData`, `KeyData` 필드를 받으며 인증서·키 바이트는 Base64로 인코딩한다. TLS가 검증되는 루프백 주소와 설치된 두 CRD가 필요하다. 파일을 지정하지 않으면 Kubernetes 테스트 대역을 사용한다.
+
+```sh
+go test -count=1 -run '^TestWorkerAppPostgresHTTP$' ./internal/workerapps
+```

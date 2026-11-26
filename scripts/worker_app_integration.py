@@ -89,12 +89,14 @@ class Verification:
         self.kube = ("kubectl", "--context", os.environ["KUBE_CONTEXT"], "--request-timeout=20s")
         self.ate = ("kubectl", "ate", "--context", os.environ["KUBE_CONTEXT"], "--token-file", os.environ["ATE_TOKEN_FILE"])
         self.slug = "worker-proof-" + secrets.token_hex(6)
+        self.api_owner = "워커 검증 " + secrets.token_hex(16)
         self.app, _ = app_identity(config["organization_id"], config["project_id"], self.slug)
         self.worker_name, self.owner = app_identity(config["organization_id"], config["project_id"], self.app)
         self.workers_path = f"{WORKER_API}/namespaces/{NAMESPACE}/httpworkers"
         self.collection = f"{self.worker}/projects/{config['project']}/worker-apps"
         self.development = f"{self.collection}/{self.app}/environments/development"
         self.rest = f"{self.api}/rest-apis/{self.slug}"
+        self.connections = f"{self.api}/projects/{config['project']}/worker-apps/{self.app}/connections"
         self.public_url = f"{self.gateway}/{self.slug}/verify"
         self.pg = {**os.environ, "PGSERVICEFILE": config["pg_service_file"], "PGSERVICE": config["pg_service"]}
         self.may_have_app = False
@@ -102,7 +104,7 @@ class Verification:
         self.may_have_route = False
 
     def call(self, method, url, headers, value=None, allowed=(200,)):
-        body = None if value is None else json.dumps(value).encode()
+        body = value if value is None or isinstance(value, bytes) else json.dumps(value).encode()
         request = Request(url, data=body, headers={"Accept": "application/json", "Content-Type": "application/json", **headers}, method=method)
         try:
             response = self.http.open(request, timeout=10)
@@ -211,6 +213,54 @@ class Verification:
         self.notes.append(f"{stage}: HTTP 200, digest `{digest}`, 요청·응답 `{json.dumps(request, ensure_ascii=False)}`")
         return True
 
+    def import_openapi(self):
+        # 외부 POST 경로와 워커 /invoke의 대응을 업로드할 때 명시한다.
+        json_value = {"application/json": {"schema": {}}}
+        spec = {
+            "openapi": "3.0.3",
+            "info": {"title": self.slug, "version": "1.0"},
+            "paths": {"/verify": {"post": {
+                "operationId": "verifyEcho",
+                "requestBody": {"required": True, "content": json_value},
+                "responses": {"200": {"description": "같은 JSON 값", "content": json_value}},
+            }}},
+        }
+        fields = {
+            "id": self.slug, "displayName": self.slug, "description": self.api_owner,
+            "projectId": self.cfg["project"], "version": "1.0", "context": "/" + self.slug,
+            "upstream": json.dumps({"main": {}}),
+            "workerAppConnections": json.dumps([{
+                "path": "/verify",
+                "workerApp": {"appId": self.app, "environment": "development", "method": "POST", "path": "/invoke"},
+            }]),
+        }
+        boundary = secrets.token_hex(18)
+        parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}'
+                 for key, value in fields.items()]
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="echo.json"\r\n'
+            f'Content-Type: application/json\r\n\r\n{json.dumps(spec)}'
+        )
+        parts.append(f"--{boundary}--\r\n")
+        headers = {**self.management_auth, "Content-Type": f"multipart/form-data; boundary={boundary}"}
+        self.may_have_api = True
+        _, created, _ = self.call("POST", self.api + "/rest-apis/import-openapi", headers,
+                                  "\r\n".join(parts).encode(), allowed=(201,))
+        ensure(self.owns_api(created), "OpenAPI 가져오기 응답의 API 소유권이 일치하지 않습니다")
+        _, saved, _ = self.call("GET", self.rest + "/openapi", self.management_auth)
+        ensure(json.loads(saved["content"]) == spec, "저장한 OpenAPI가 업로드한 명세와 다릅니다")
+        self.check_connection(deployed=False)
+        self.notes.append("OpenAPI 외부 POST /verify → 개발 워커 POST /invoke 연결 저장 확인")
+
+    def owns_api(self, api):
+        return api["id"] == self.slug and api["description"] == self.api_owner and api["projectId"] == self.cfg["project"]
+
+    def check_connection(self, deployed):
+        _, links, _ = self.call("GET", self.connections, self.management_auth)
+        ensure(any(link["apiId"] == self.slug and link["method"] == "POST" and link["path"] == "/verify" and
+                   link["configured"] and link["deployed"] is deployed for link in links),
+               "워크플로에서 만든 API가 워커 앱 영향 목록과 일치하지 않습니다")
+
     def verify(self):
         initial, broken, next_package = (self.cfg[key] for key in ("package_v1", "package_failure", "package_v2"))
         ensure(all(PACKAGE.fullmatch(value) for value in (initial, broken, next_package)) and
@@ -226,13 +276,12 @@ class Verification:
         self.call("PUT", self.development, self.management_auth, {}, allowed=(202,))
         await_state("활성 v1", lambda: self.is_state("ready", initial, initial))
 
-        self.may_have_api = True
-        self.call("POST", self.api + "/rest-apis", self.management_auth, {
-            "id": self.slug, "projectId": self.cfg["project"], "displayName": self.slug,
-            "version": "1.0", "context": "/" + self.slug, "upstream": {"main": {}},
-            "operations": [{"request": {"method": "POST", "path": "/verify"},
-                            "workerApp": {"appId": self.app, "environment": "development", "method": "POST", "path": "/invoke"}}],
-        }, allowed=(201,))
+        trial = {"verification": self.slug, "stage": "app-test"}
+        _, result, _ = self.call("POST", self.development + "/invoke", self.management_auth, trial)
+        ensure(result == {"status": 200, "body": trial}, "Gateway 배포 전 워커 앱 JSON 시험 실패")
+        self.notes.append("Gateway 배포 전 워커 앱 JSON 시험: HTTP 200, 응답 값 일치")
+
+        self.import_openapi()
         self.may_have_route = True
         _, deployment, _ = self.call("POST", self.rest + "/deployments", self.management_auth, {
             "name": self.slug, "base": "current", "gatewayId": self.cfg["gateway"],
@@ -244,6 +293,7 @@ class Verification:
             ensure(current.get("status") != "FAILED", "개발 Gateway 배포 실패")
             return current.get("status") == "DEPLOYED"
         await_state("개발 Gateway 배포", gateway_ready)
+        self.check_connection(deployed=True)
         self.call("POST", self.public_url, {}, {"verification": self.slug}, allowed=(401, 403))
         self.notes.append(f"개발 Gateway URL: {self.public_url}")
         self.expect_echo("v1 최초 호출", initial)
@@ -266,8 +316,11 @@ class Verification:
         failures = []
         if self.may_have_api:
             try:
-                self.call("DELETE", self.rest, self.management_auth, allowed=(200, 204, 404))
-                self.call("GET", self.rest, self.management_auth, allowed=(404,))
+                code, api, _ = self.call("GET", self.rest, self.management_auth, allowed=(200, 404))
+                if code == 200:
+                    ensure(self.owns_api(api), "테스트 API 소유권 불일치")
+                    self.call("DELETE", self.rest, self.management_auth, allowed=(200, 204, 404))
+                    self.call("GET", self.rest, self.management_auth, allowed=(404,))
                 if self.may_have_route:
                     await_state("Gateway 경로 정리", lambda: self.call(
                         "POST", self.public_url, self.gateway_auth, {"verification": self.slug},

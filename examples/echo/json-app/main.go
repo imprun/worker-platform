@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"time"
 	"unicode/utf8"
 
 	"github.com/imprun/worker-platform/internal/apppackage"
@@ -15,8 +16,16 @@ const (
 	maxEchoBytes = 64 << 10
 )
 
+// 검증 패키지마다 시작 확인 시간만 바꾸며 Echo 응답 계약은 동일하다.
+var verificationDelay = "0s"
+
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--check" {
+		delay, err := time.ParseDuration(verificationDelay)
+		if err != nil || delay < 0 {
+			os.Exit(1)
+		}
+		time.Sleep(delay)
 		if err := record(nil); err != nil {
 			os.Exit(1)
 		}
