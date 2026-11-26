@@ -400,7 +400,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("worker_sha")
     parser.add_argument("api_sha")
+    parser.add_argument("--check-dispatch", action="store_true", help="수동 요청의 입력과 실행 조건을 확인한다")
     args = parser.parse_args()
+    if args.check_dispatch:
+        if os.environ.get("GITHUB_REF") != "refs/heads/main":
+            parser.error("워커 앱 실환경 검증은 Worker Platform main에서 실행하세요")
+        if os.environ.get("PRODUCT_ATE_ENABLED") != "true":
+            parser.error("워커 앱 실환경 검증에 ATE_INTEGRATION_ENABLED=true가 필요합니다")
+        if not SHA.fullmatch(args.worker_sha) or not SHA.fullmatch(args.api_sha):
+            parser.error("Worker Platform과 API Platform의 전체 SHA가 필요합니다")
+        return 0
+
     result = None
     failed = False
     try:

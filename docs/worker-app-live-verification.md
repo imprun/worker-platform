@@ -34,6 +34,8 @@
 
 워커 제품 검증은 기존 `ATE integration`의 별도 작업이다. 워커 `main`에서 기존 `ATE_INTEGRATION_ENABLED=true` 조건을 사용한다. 워커 변경으로 자동 실행할 때는 저장소 변수 `ATE_PRODUCT_API_SHA`에 함께 검증할 API Platform의 전체 SHA를 설정한다. API Platform만 변경된 경우에는 워커 `main`에서 수동 실행하고 `base`에는 현재 워커 `main` SHA, `api_sha`에는 새 API Platform 전체 SHA를 입력한다. 워커 변경 감지가 비어도 제품 작업을 실행한다. 러너 공유 잠금으로 기존 ATE 스모크와 동시에 실행하지 않는다.
 
+`api_sha`를 지정한 수동 실행에서는 호스팅 러너가 먼저 `main`, `ATE_INTEGRATION_ENABLED=true`와 두 저장소 SHA의 형식을 검사한다. 조건이 빠지면 대기열에 실환경 작업을 보내기 전에 해당 조건을 표시하고 실패 처리한다.
+
 Actions는 기존 self-hosted ATE 러너에서 이미 준비된 테스트 서비스를 검증한다. 검토한 두 커밋을 빌드한 뒤 전용 `wp-product-verification` 네임스페이스에 배포한다. Run API, 워커 컨트롤러, API Platform, 개발 Gateway Deployment에는 `spec.template.metadata.annotations.imprun.dev/source-sha`와 이미지 digest를 고정한다. API Gateway 등록의 ID·버전 및 HTTPS 엔드포인트도 테스트 구성과 일치해야 한다. 일반 워커 Echo 스모크의 `wp-echo-example` 리소스는 제품 실행에서 사용하지 않는다.
 
 러너에 `KUBE_CONTEXT`, `ATE_TOKEN_FILE`, 그리고 아래 JSON 파일의 경로인 `ATE_PRODUCT_FIXTURE_FILE`을 제공한다. 파일 자체에는 토큰을 담지 않는다.
