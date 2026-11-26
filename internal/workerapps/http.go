@@ -38,6 +38,7 @@ type App struct {
 	ID                string `json:"id"`
 	ProjectID         string `json:"projectId"`
 	DeletionRequested bool   `json:"deletionRequested,omitempty"`
+	DeletionSupported bool   `json:"deletionSupported,omitempty"`
 	Registration
 	deletionRequest string
 }
@@ -74,6 +75,9 @@ func Handler(access ProjectAccess, service AppService, retire RetirementAccess) 
 		apps, err := service.List(r.Context(), scope)
 		if apps == nil {
 			apps = []App{}
+		}
+		for i := range apps {
+			apps[i].DeletionSupported = retire != nil
 		}
 		return respond(w, http.StatusOK, apps, err)
 	}))
