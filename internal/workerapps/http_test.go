@@ -17,6 +17,7 @@ func TestWorkerAppHTTPDeniesAccessBeforeCallingService(t *testing.T) {
 		{http.MethodGet, base, false},
 		{http.MethodGet, base + "/app/environments/development", false},
 		{http.MethodPut, base + "/app/environments/development", true},
+		{http.MethodPost, base + "/app/environments/development/invoke", true},
 	} {
 		handler := Handler(func(_ *http.Request, project string, write bool) (ProjectScope, error) {
 			if project != "demo" || write != entry.write {
