@@ -2,6 +2,8 @@
 
 앱 서버에는 인증된 요청에서 조직과 프로젝트를 결정하는 권한 검사, 프로젝트별 승인 프로필과 앱별 개발 호스트 설정, PostgreSQL 및 범위가 제한된 Kubernetes 클라이언트가 필요하다. Run API의 `-worker-app-config-file` 플래그로 경로를 활성화한다. API Platform은 권한 검사를 활성화하고 `worker-app-access` 경로를 제공해야 한다. 워커 API는 해당 HTTPS 서버에 사용자 Bearer 토큰을 전달하여 조직·프로젝트 범위를 확인한다.
 
+콘솔이 `X-Org-Id`를 보낼 때 Run API는 그 조직도 권한 서버에 전달한다. 인증된 조직과 일치할 때만 프로젝트 조회나 변경이 가능하다.
+
 같은 네임스페이스에 `deploy/run-api/worker-app-rbac.yaml`을 적용한다. 활성화한 Run API Deployment에 `serviceAccountName: worker-app-api`, `automountServiceAccountToken: true` 및 설정 파일 볼륨을 지정한다. 설정의 예는 다음과 같다.
 
 ```json
