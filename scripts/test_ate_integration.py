@@ -24,7 +24,7 @@ class IntegrationGateTest(unittest.TestCase):
     def test_worker_app_server_requires_live_ate(self):
         paths = ("cmd/run-api/main.go\0internal/workerapps/service.go\0"
                  "internal/workerapps/schema.sql\0Dockerfile.run-api\0"
-                 "scripts/worker_app_integration.py\0")
+                 "scripts/worker_app_integration.py\0scripts/verify-worker-oci.py\0")
         with patch.object(gate, "output", return_value=paths):
             self.assertEqual(sorted(paths.rstrip("\0").split("\0")), gate.changes("base", "head"))
 

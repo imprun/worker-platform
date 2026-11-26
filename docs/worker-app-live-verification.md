@@ -36,6 +36,10 @@
 
 `api_sha`를 지정한 수동 실행에서는 호스팅 러너가 먼저 `main`, `ATE_INTEGRATION_ENABLED=true`와 두 저장소 SHA의 형식을 검사한다. 조건이 빠지면 대기열에 실환경 작업을 보내기 전에 해당 조건을 표시하고 실패 처리한다.
 
+워커 변경 감지가 선택한 `main` 커밋은 호스팅 러너에서 `워커 앱 ARM64 검증 후보 빌드` 작업을 실행한다. 같은 커밋을 다시 빌드하려면 워커 `main`의 수동 실행에서 `base`에 현재 `main` SHA를 입력하고 `build_worker_artifacts`를 켠다. 후보 빌드만 실행할 때는 `api_sha`를 비운다.
+
+`worker-app-arm64-<SHA>-<실행 시도 번호>` 아티팩트에는 Run API, 워커 컨트롤러, 공통 Actor 런타임의 OCI 아카이브와 Echo v1·실패 후보·v2의 OCI 레이아웃이 들어 있다. 작업이 검증한 이미지 소스 SHA와 ARM64 메타데이터, 이미지·패키지 digest는 `source-revision.txt`, `images.txt`, `packages.txt`에서 확인한다. 다운로드한 파일은 `sha256sum -c SHA256SUMS`로 검증한다. 같이 검증할 API Platform 커밋은 해당 저장소의 기존 ARM64 빌드에서 `upload_bundle=true`로 보존한다. 두 아티팩트를 읽고 승인된 시험 레지스트리에서 digest를 대조한 다음 전용 환경을 준비한다. [API Platform ARM64 빌드](https://github.com/imprun/api-platform/actions/workflows/build-imprun-operator-oci.yml)
+
 Actions의 워커 제품 작업은 Kubernetes의 기존 ARC 러너 세트를 사용한다. `imprun-oci-builds` 그룹의 `arc-runner-set-imprun`을 선택해 이미 준비된 테스트 서비스에 연결한다. 검토한 두 커밋을 빌드한 뒤 전용 `wp-product-verification` 네임스페이스에 배포한다. Run API, 워커 컨트롤러, API Platform, 개발 Gateway Deployment에는 `spec.template.metadata.annotations.imprun.dev/source-sha`와 이미지 digest를 고정한다. API Gateway 등록의 ID·버전 및 HTTPS 엔드포인트도 테스트 구성과 일치해야 한다. 일반 워커 Echo 스모크의 `wp-echo-example` 리소스는 제품 실행에서 사용하지 않는다.
 
 러너에 `KUBE_CONTEXT`, `ATE_TOKEN_FILE`, 그리고 아래 JSON 파일의 경로인 `ATE_PRODUCT_FIXTURE_FILE`을 제공한다. 파일 자체에는 토큰을 담지 않는다.

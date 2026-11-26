@@ -31,6 +31,7 @@ BUILD_BOUNDARIES = {
     "scripts/ate_integration.py",
     "scripts/worker_app_integration.py",
     "scripts/build-app-package.py",
+    "scripts/verify-worker-oci.py",
 }
 ATE_DEPENDENCY = re.compile(
     r"^[+-]\s*(?:go\s|toolchain\s|(?:go\.ate\.dev/\S+|k8s\.io/\S+|"
