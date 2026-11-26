@@ -93,6 +93,45 @@ class ProductIntegrationTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "실제 응답 패키지 digest 불일치"):
                     test.expect_echo("리비전 불일치", config["package_v1"])
             test.may_have_app = False
+            owned_api = {"id": test.slug, "description": test.api_owner, "projectId": config["project"]}
+            deployment = {"deploymentId": "test-deployment", "name": test.slug, "gatewayId": config["gateway"],
+                          "status": "DEPLOYED"}
+            listed = {"list": [deployment], "pagination": {"total": 1}}
+            responses = [
+                (200, owned_api, {}),
+                (200, listed, {}),
+                (200, {"status": "UNDEPLOYING"}, {}),
+                (200, {"status": "UNDEPLOYING"}, {}),
+                (200, {"status": "UNDEPLOYED"}, {}),
+                (404, None, {}),
+                (204, None, {}),
+                (404, None, {}),
+            ]
+            auth = test.management_auth
+            url = test.rest + "/deployments/test-deployment"
+            with (patch.object(test, "call", side_effect=responses) as call, patch.object(smoke.time, "sleep")):
+                test.cleanup()
+                self.assertEqual([
+                    ("GET", test.rest, auth),
+                    ("GET", test.rest + "/deployments", auth),
+                    ("POST", url + "/undeploy?gatewayId=" + config["gateway"], auth),
+                    ("GET", url, auth),
+                    ("GET", url, auth),
+                    ("POST", test.public_url, test.gateway_auth, {"verification": test.slug}),
+                    ("DELETE", test.rest, auth),
+                    ("GET", test.rest, auth),
+                ], [request.args for request in call.call_args_list])
+
+            test.may_have_app = True
+            failed = {"list": [{**deployment, "status": "FAILED"}], "pagination": {"total": 1}}
+            with (patch.object(test, "call", side_effect=[(200, owned_api, {}), (200, failed, {})]),
+                  patch.object(test, "raw") as kubernetes):
+                with self.assertRaisesRegex(ValueError, "정리하지 못했습니다"):
+                    test.cleanup()
+                kubernetes.assert_not_called()
+            self.assertIn("테스트 워커 앱 정리 보류", test.notes[-1])
+
+            test.may_have_app = False
             with patch.object(test, "call", return_value=(200, {
                 "id": test.slug, "description": "다른 작업에서 만든 API", "projectId": config["project"],
             }, {})) as call:
