@@ -295,6 +295,8 @@ class Verification:
         await_state("개발 Gateway 배포", gateway_ready)
         self.check_connection(deployed=True)
         self.call("POST", self.public_url, {}, {"verification": self.slug}, allowed=(401, 403))
+        self.call("DELETE", self.collection + "/" + self.app, self.management_auth, allowed=(409,))
+        self.notes.append("활성 개발 Gateway가 사용하는 워커 앱의 삭제를 HTTP 409로 거부")
         self.notes.append(f"개발 Gateway URL: {self.public_url}")
         self.expect_echo("v1 최초 호출", initial)
 

@@ -156,3 +156,21 @@ func TestPackageRolloutStatus(t *testing.T) {
 	check("Preparing", v2, v1, nil)
 	check("Published", v2, v2, &platform.ATEDeploymentResult{Revision: "v2"})
 }
+
+func TestWorkerAppSubmissionAwaitsConfirmation(t *testing.T) {
+	original := example(t, "httpworker.yaml")
+	candidate := original.DeepCopy()
+	candidate.SetAnnotations(map[string]string{platform.WorkerAppSubmissionPendingAnnotation: "true"})
+	if sameRevision(original, candidate) {
+		t.Fatal("게시 확인이 바뀌면 컨트롤러가 다시 확인해야 합니다")
+	}
+	kube := fake.NewSimpleDynamicClient(runtime.NewScheme(), candidate)
+	c := Controller{workers: kube.Resource(workersGVR).Namespace(candidate.GetNamespace())}
+	if err := c.reconcile(t.Context(), candidate.GetName()); err != nil {
+		t.Fatal(err)
+	}
+	actions := kube.Actions()
+	if len(actions) != 1 || actions[0].GetVerb() != "get" {
+		t.Fatalf("게시를 확인하기 전에는 워커만 조회해야 합니다: %+v", actions)
+	}
+}

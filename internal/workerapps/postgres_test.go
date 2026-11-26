@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -77,6 +78,10 @@ func TestWorkerAppPostgresHTTP(t *testing.T) {
 			t.Error("테스트 등록 데이터 정리 실패")
 		}
 	})
+	var server *httptest.Server
+	var deletionResult atomic.Int32
+	var lastDeletionRequest atomic.Value
+	lastDeletionRequest.Store("")
 	handler := Handler(func(r *http.Request, project string, write bool) (ProjectScope, error) {
 		switch r.Header.Get("X-Test-Role") {
 		case "read":
@@ -88,8 +93,36 @@ func TestWorkerAppPostgresHTTP(t *testing.T) {
 			return ProjectScope{}, ErrUnauthorized
 		}
 		return ProjectScope{OrganizationID: organization, ProjectID: project}, nil
-	}, service)
-	server := httptest.NewServer(handler)
+	}, service, func(r *http.Request, scope ProjectScope, appID, requestID string) error {
+		lastDeletionRequest.Store(requestID)
+		targetPath := "/projects/" + scope.ProjectID + "/worker-apps/" + appID + "/environments/development/target"
+		query, err := http.NewRequestWithContext(r.Context(), http.MethodGet, server.URL+targetPath, nil)
+		if err != nil {
+			return err
+		}
+		query.Header.Set("X-Test-Role", "read")
+		query.Header.Set(deletionRequestHeader, requestID)
+		response, err := server.Client().Do(query)
+		if err != nil {
+			return err
+		}
+		defer response.Body.Close()
+		var target LinkTarget
+		if err := json.NewDecoder(response.Body).Decode(&target); err != nil || response.StatusCode != http.StatusOK ||
+			!target.DeletionRequested || !target.DeletionVerified || target.URL != "" {
+			t.Error("삭제 예약 서버가 정확한 워커 요청과 대상 상태를 확인할 수 있어야 합니다")
+			return ErrRetirementUnavailable
+		}
+		switch deletionResult.Load() {
+		case 1:
+			return ErrRetirementUnavailable
+		case 2:
+			return nil
+		default:
+			return ErrAppInUse
+		}
+	})
+	server = httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	request := func(method, path, role, body string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
@@ -217,6 +250,72 @@ func TestWorkerAppPostgresHTTP(t *testing.T) {
 			status.LatestAttempt.Generation <= status.Active.Generation {
 			t.Fatalf("v2 준비 중 v1이 보존되어야 합니다: %+v, %v", status, err)
 		}
+	}
+
+	appPath := collection + "/" + id
+	check(request("DELETE", appPath, "read", ""), http.StatusForbidden)
+	check(request("DELETE", strings.Replace(appPath, "/first/", "/second/", 1), "write", ""), http.StatusNotFound)
+	check(request("DELETE", appPath, "write", ""), http.StatusConflict)
+	testTarget := request("GET", path+"/target", "read", "")
+	target = LinkTarget{}
+	check(testTarget, http.StatusOK)
+	if err := json.Unmarshal(testTarget.Body.Bytes(), &target); err != nil || target.DeletionRequested || target.Revision != "v1" {
+		t.Fatalf("삭제를 거부한 앱의 활성 배포를 유지해야 합니다: %+v, %v", target, err)
+	}
+	refused := lastDeletionRequest.Load().(string)
+
+	deletionResult.Store(1)
+	check(request("DELETE", appPath, "write", ""), http.StatusServiceUnavailable)
+	pending := lastDeletionRequest.Load().(string)
+	if pending == "" || pending == refused {
+		t.Fatal("거부된 요청을 다시 사용할 수 없습니다")
+	}
+	check(request("PUT", path, "write", "{}"), http.StatusConflict)
+	visible := request("GET", path+"/target", "read", "")
+	check(visible, http.StatusOK)
+	if strings.Contains(visible.Body.String(), pending) || strings.Contains(visible.Body.String(), "deletionVerified") {
+		t.Fatal("요청 식별자나 검증 결과를 일반 대상 조회에 노출할 수 없습니다")
+	}
+
+	if os.Getenv("WORKER_APP_TEST_KUBE_FILE") != "" {
+		// 임시 API 서버에는 가비지 컬렉션 컨트롤러가 없다.
+		return
+	}
+	workers := kube.Resource(workerResource).Namespace(namespace)
+	owned, err := workers.Get(ctx, worker, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned.SetUID("owned-test-worker")
+	if _, err := workers.Update(ctx, owned, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	routeResource := schema.GroupVersionResource{Group: platform.GatewayAPI, Version: "v1", Resource: "httproutes"}
+	routes := kube.Resource(routeResource).Namespace(namespace)
+	if _, err := routes.Create(ctx, &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": routeResource.GroupVersion().String(), "kind": "HTTPRoute",
+		"metadata": map[string]any{"name": worker, "namespace": namespace},
+	}}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	deletionResult.Store(2)
+	check(request("DELETE", appPath, "write", ""), http.StatusAccepted)
+	check(request("DELETE", appPath, "write", ""), http.StatusAccepted)
+	if lastDeletionRequest.Load().(string) != pending {
+		t.Fatal("승인 결과가 불확실하면 같은 삭제 요청을 다시 사용해야 합니다")
+	}
+	if err := routes.Delete(ctx, worker, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	check(request("DELETE", appPath, "write", ""), http.StatusNoContent)
+	check(request("DELETE", appPath, "write", ""), http.StatusNoContent)
+	check(request("GET", path+"/target", "read", ""), http.StatusNotFound)
+	check(request("PUT", path, "write", "{}"), http.StatusNotFound)
+	recreated := request("POST", collection, "write", registration)
+	check(recreated, http.StatusCreated)
+	var app App
+	if err := json.Unmarshal(recreated.Body.Bytes(), &app); err != nil || app.ID == "" || app.ID == id {
+		t.Fatalf("같은 이름을 등록해도 삭제된 앱 ID를 재사용할 수 없습니다: %+v, %v", app, err)
 	}
 
 }

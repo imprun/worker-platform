@@ -87,6 +87,7 @@ class ProductIntegrationTest(unittest.TestCase):
             requests = [value for _, url, value in calls if url == test.public_url and "stage" in value]
             self.assertEqual(5, len(requests))
             self.assertEqual(6, sum("HTTP 200" in note for note in test.notes))
+            self.assertIn(("DELETE", test.collection + "/" + test.app, None), calls)
             with patch.object(test, "call", side_effect=lambda _method, _url, _headers, data: (
                 200, data, {smoke.DIGEST_HEADER: "sha256:" + "4" * 64},
             )):
