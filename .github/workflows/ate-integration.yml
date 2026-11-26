@@ -67,7 +67,9 @@ jobs:
       vars.ATE_INTEGRATION_ENABLED == 'true' &&
       ((needs.changes.outputs.required == 'true' && vars.ATE_PRODUCT_API_SHA != '') ||
         (github.event_name == 'workflow_dispatch' && inputs.api_sha != ''))
-    runs-on: [self-hosted, linux, ate-integration]
+    runs-on:
+      group: imprun-oci-builds
+      labels: arc-runner-set-imprun
     timeout-minutes: 30
     concurrency:
       group: worker-platform-ate-integration
