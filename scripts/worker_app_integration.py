@@ -312,6 +312,33 @@ class Verification:
         await_state("활성 v1 롤백", lambda: self.is_state("ready", initial, initial))
         self.expect_echo("같은 URL에서 v1 롤백", initial)
 
+    def undeploy_gateway(self):
+        _, deployments, _ = self.call("GET", self.rest + "/deployments", self.management_auth)
+        items = deployments["list"]
+        ensure(len(items) == deployments["pagination"]["total"] <= 1, "실행에서 소유한 배포만 해제할 수 있습니다")
+        if not items:
+            return
+        deployment = items[0]
+        deployment_id = deployment["deploymentId"]
+        gateway = self.cfg["gateway"]
+        ensure(deployment["name"] == self.slug and deployment["gatewayId"] == gateway and
+               IDENTITY.fullmatch(deployment_id), "테스트 Gateway 배포 소유권 불일치")
+        status = deployment["status"]
+        if status == "UNDEPLOYED":
+            return
+        url = self.rest + "/deployments/" + deployment_id
+        if status in ("DEPLOYING", "DEPLOYED"):
+            self.call("POST", url + "/undeploy?gatewayId=" + gateway, self.management_auth)
+        else:
+            ensure(status == "UNDEPLOYING", "테스트 Gateway 배포를 해제할 수 없는 상태입니다")
+
+        def undeployed():
+            _, current, _ = self.call("GET", url, self.management_auth)
+            ensure(current["status"] in ("UNDEPLOYING", "UNDEPLOYED"), "테스트 Gateway 배포 해제 실패")
+            return current["status"] == "UNDEPLOYED"
+
+        await_state("테스트 Gateway 배포 해제", undeployed, 60)
+
     def cleanup(self):
         failures = []
         if self.may_have_api:
@@ -319,15 +346,20 @@ class Verification:
                 code, api, _ = self.call("GET", self.rest, self.management_auth, allowed=(200, 404))
                 if code == 200:
                     ensure(self.owns_api(api), "테스트 API 소유권 불일치")
-                    self.call("DELETE", self.rest, self.management_auth, allowed=(200, 204, 404))
-                    self.call("GET", self.rest, self.management_auth, allowed=(404,))
+                    if self.may_have_route:
+                        self.undeploy_gateway()
                 if self.may_have_route:
                     await_state("Gateway 경로 정리", lambda: self.call(
                         "POST", self.public_url, self.gateway_auth, {"verification": self.slug},
                         allowed=(200, 404, 502, 503))[0] == 404, 60)
+                if code == 200:
+                    self.call("DELETE", self.rest, self.management_auth, allowed=(200, 204, 404))
+                    self.call("GET", self.rest, self.management_auth, allowed=(404,))
             except (ValueError, KeyError, OSError):
-                failures.append("테스트 API")
-        if self.may_have_app:
+                failures.append("테스트 API·Gateway 배포")
+        if self.may_have_app and failures:
+            failures.append("테스트 워커 앱 정리 보류")
+        elif self.may_have_app:
             try:
                 workers = self.raw(self.workers_path)["items"]
                 matches = [item["metadata"] for item in workers if item["metadata"]["name"] == self.worker_name]
