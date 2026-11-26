@@ -26,6 +26,10 @@ func PlatformProjectAccess(endpoint string) (ProjectAccess, error) {
 			return http.ErrUseLastResponse
 		},
 	}
+	return platformProjectAccess(base, client), nil
+}
+
+func platformProjectAccess(base *url.URL, client *http.Client) ProjectAccess {
 	return func(r *http.Request, project string, write bool) (ProjectScope, error) {
 		authorization := r.Header.Get("Authorization")
 		token, ok := strings.CutPrefix(authorization, "Bearer ")
@@ -34,6 +38,11 @@ func PlatformProjectAccess(endpoint string) (ProjectAccess, error) {
 		}
 		if !projectHandle.MatchString(project) {
 			return ProjectScope{}, ErrInvalidInput
+		}
+		requestedOrganization := r.Header.Get("X-Org-Id")
+		if len(r.Header.Values("X-Org-Id")) > 1 ||
+			requestedOrganization != "" && !projectHandle.MatchString(requestedOrganization) {
+			return ProjectScope{}, ErrForbidden
 		}
 		method := http.MethodGet
 		if write {
@@ -45,6 +54,9 @@ func PlatformProjectAccess(endpoint string) (ProjectAccess, error) {
 			return ProjectScope{}, err
 		}
 		request.Header.Set("Authorization", authorization)
+		if requestedOrganization != "" {
+			request.Header.Set("X-Org-Id", requestedOrganization)
+		}
 		response, err := client.Do(request)
 		if err != nil {
 			return ProjectScope{}, err
@@ -62,5 +74,5 @@ func PlatformProjectAccess(endpoint string) (ProjectAccess, error) {
 		default:
 			return ProjectScope{}, errors.New("API Platform 프로젝트 권한을 확인하지 못했습니다")
 		}
-	}, nil
+	}
 }
