@@ -36,7 +36,7 @@
 
 `api_sha`를 지정한 수동 실행에서는 호스팅 러너가 먼저 `main`, `ATE_INTEGRATION_ENABLED=true`와 두 저장소 SHA의 형식을 검사한다. 조건이 빠지면 대기열에 실환경 작업을 보내기 전에 해당 조건을 표시하고 실패 처리한다.
 
-Actions는 기존 self-hosted ATE 러너에서 이미 준비된 테스트 서비스를 검증한다. 검토한 두 커밋을 빌드한 뒤 전용 `wp-product-verification` 네임스페이스에 배포한다. Run API, 워커 컨트롤러, API Platform, 개발 Gateway Deployment에는 `spec.template.metadata.annotations.imprun.dev/source-sha`와 이미지 digest를 고정한다. API Gateway 등록의 ID·버전 및 HTTPS 엔드포인트도 테스트 구성과 일치해야 한다. 일반 워커 Echo 스모크의 `wp-echo-example` 리소스는 제품 실행에서 사용하지 않는다.
+Actions의 워커 제품 작업은 Kubernetes의 기존 ARC 러너 세트를 사용한다. `imprun-oci-builds` 그룹의 `arc-runner-set-imprun`을 선택해 이미 준비된 테스트 서비스에 연결한다. 검토한 두 커밋을 빌드한 뒤 전용 `wp-product-verification` 네임스페이스에 배포한다. Run API, 워커 컨트롤러, API Platform, 개발 Gateway Deployment에는 `spec.template.metadata.annotations.imprun.dev/source-sha`와 이미지 digest를 고정한다. API Gateway 등록의 ID·버전 및 HTTPS 엔드포인트도 테스트 구성과 일치해야 한다. 일반 워커 Echo 스모크의 `wp-echo-example` 리소스는 제품 실행에서 사용하지 않는다.
 
 러너에 `KUBE_CONTEXT`, `ATE_TOKEN_FILE`, 그리고 아래 JSON 파일의 경로인 `ATE_PRODUCT_FIXTURE_FILE`을 제공한다. 파일 자체에는 토큰을 담지 않는다.
 
