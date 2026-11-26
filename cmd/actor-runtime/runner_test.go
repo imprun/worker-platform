@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -67,6 +68,86 @@ func TestAttemptInvokesEcho(t *testing.T) {
 				t.Fatalf("unexpected Echo response: HTTP %d, body %s", w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestInvokeRecordsAndReturnsJSON(t *testing.T) {
+	dir := t.TempDir()
+	entrypoint := filepath.Join(dir, "json-echo.exe")
+	build := exec.CommandContext(t.Context(), "go", "build", "-trimpath", "-o", entrypoint, "../../examples/echo/json-app")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build JSON Echo: %v\n%s", err, output)
+	}
+	runner := appRunner{apppackage.Installed{Dir: dir, Entrypoint: entrypoint}}
+	if err := runner.command(t.Context(), "--check").Run(); err != nil {
+		t.Fatalf("check JSON Echo journal: %v", err)
+	}
+	server := httptest.NewServer(runner.routes())
+	defer server.Close()
+	invoke := func(body string) (int, string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/invoke", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		data, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, string(data)
+	}
+
+	tests := []struct{ input, want string }{
+		{input: `{"hello":"world"}`, want: `{"hello":"world"}`},
+		{
+			input: " {\n  \"number\": 9007199254740993, \"items\": [true, null, {\"name\": \"에코\"}]\n}\n",
+			want:  `{"number":9007199254740993,"items":[true,null,{"name":"에코"}]}`,
+		},
+		{input: `"hello"`, want: `"hello"`},
+		{input: `null`, want: `null`},
+	}
+	var journal strings.Builder
+	for i, tt := range tests {
+		status, body := invoke(tt.input)
+		if status != http.StatusOK || body != tt.want {
+			t.Fatalf("unexpected echo: HTTP %d, body %s", status, body)
+		}
+		if i == 0 {
+			t.Logf("POST /invoke %s", tt.input)
+			t.Logf("HTTP %d %s", status, body)
+		}
+		journal.WriteString(tt.want + "\n")
+	}
+	for _, invalid := range []string{`{"missing":}`, `"` + strings.Repeat("a", maxOutputBytes) + `"`} {
+		if status, _ := invoke(invalid); status != http.StatusBadRequest {
+			t.Fatalf("invalid or oversized input returned HTTP %d", status)
+		}
+	}
+	path := filepath.Join(dir, "requests.jsonl")
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != journal.String() {
+		t.Fatalf("unexpected request journal: %q, error %v", data, err)
+	}
+
+	firstRecord, _, _ := strings.Cut(string(data), "\n")
+	t.Logf("requests.jsonl %s", firstRecord)
+
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := invoke(`{"message":"cannot record"}`); status != http.StatusBadGateway {
+		t.Fatalf("recording failure returned HTTP %d", status)
 	}
 }
 
