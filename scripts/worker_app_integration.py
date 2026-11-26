@@ -33,8 +33,8 @@ def ensure(condition, message):
         raise ValueError(message)
 
 
-def tool(arguments, stdin=None, env=None):
-    run = subprocess.run(arguments, input=stdin, env=env, text=True, capture_output=True, timeout=30)
+def tool(arguments):
+    run = subprocess.run(arguments, text=True, capture_output=True, timeout=30)
     ensure(run.returncode == 0, f"{arguments[0]} 실행 실패")
     return run.stdout.strip()
 
@@ -94,11 +94,11 @@ class Verification:
         self.worker_name, self.owner = app_identity(config["organization_id"], config["project_id"], self.app)
         self.workers_path = f"{WORKER_API}/namespaces/{NAMESPACE}/httpworkers"
         self.collection = f"{self.worker}/projects/{config['project']}/worker-apps"
-        self.development = f"{self.collection}/{self.app}/environments/development"
+        self.app_url = f"{self.collection}/{self.app}"
+        self.development = f"{self.app_url}/environments/development"
         self.rest = f"{self.api}/rest-apis/{self.slug}"
         self.connections = f"{self.api}/projects/{config['project']}/worker-apps/{self.app}/connections"
         self.public_url = f"{self.gateway}/{self.slug}/verify"
-        self.pg = {**os.environ, "PGSERVICEFILE": config["pg_service_file"], "PGSERVICE": config["pg_service"]}
         self.may_have_app = False
         self.may_have_api = False
         self.may_have_route = False
@@ -124,11 +124,12 @@ class Verification:
     def raw(self, path):
         return json.loads(tool((*self.kube, "get", "--raw", path)))
 
-    def psql(self, sql):
-        sqlvars = {"fixture_org": self.cfg["organization_id"], "fixture_project": self.cfg["project_id"],
-                   "fixture_app": self.app, "fixture_name": self.slug}
-        variables = [part for entry in sqlvars.items() for part in ("-v", "=".join(entry))]
-        return tool(("psql", "-XAtq", "-v", "ON_ERROR_STOP=1", *variables), stdin=sql, env=self.pg)
+    def registered_apps(self):
+        _, apps, _ = self.call("GET", self.collection, self.management_auth)
+        ensure(isinstance(apps, list) and all(
+            isinstance(app, dict) and app.get("projectId") == self.cfg["project_id"] for app in apps
+        ), "시험 프로젝트 워커 앱 목록의 범위가 다릅니다")
+        return apps
 
     def ate_objects(self, resource):
         objects = json.loads(tool((*self.ate, "get", resource, "-a", NAMESPACE, "-o", "json")))
@@ -170,19 +171,17 @@ class Verification:
                not self.kube_json("-n", NAMESPACE, "get", "httproutes")["items"] and
                all(not self.ate_objects(resource) for resource in ("actors", "actor-templates")),
                "테스트 공간에 기존 워커나 라우트가 있습니다")
-        ensure(self.psql("SELECT current_database();") == self.cfg["pg_database"], "워커 앱 전용 데이터베이스를 확인하세요")
-        ensure(self.psql("SELECT count(*) FROM worker_apps WHERE organization_id = :'fixture_org' AND project_id = :'fixture_project';") == "0",
-               "테스트 프로젝트에 기존 워커 앱이 있습니다")
         _, scope, _ = self.call("GET", f"{self.api}/projects/{self.cfg['project']}/worker-app-access", self.management_auth)
         ensure(scope == {"organizationId": self.cfg["organization_id"], "projectId": self.cfg["project_id"]},
                "관리 토큰이 격리된 테스트 프로젝트를 가리키지 않습니다")
+        ensure(not self.registered_apps(), "테스트 프로젝트에 기존 워커 앱이 있습니다")
         _, gateway, _ = self.call("GET", self.api + "/gateways/" + self.cfg["gateway"], self.management_auth)
         ensure(gateway["id"] == self.cfg["gateway"] and gateway["version"] == self.cfg["gateway_version"] and
                self.gateway in [value.rstrip("/") for value in gateway.get("endpoints", [])], "등록된 전용 개발 Gateway를 확인하세요")
         self.call("GET", self.rest, self.management_auth, allowed=(404,))
         self.call("GET", self.development + "/target", self.management_auth, allowed=(404,))
         self.call("POST", self.public_url, self.gateway_auth, {"verification": self.slug}, allowed=(404,))
-        self.notes.append("검증 SHA와 전용 Kubernetes·PostgreSQL 범위 확인")
+        self.notes.append("검증 SHA와 전용 Kubernetes·워커 프로젝트 범위 확인")
 
     def worker_status(self):
         _, status, _ = self.call("GET", self.development, self.management_auth)
@@ -295,7 +294,7 @@ class Verification:
         await_state("개발 Gateway 배포", gateway_ready)
         self.check_connection(deployed=True)
         self.call("POST", self.public_url, {}, {"verification": self.slug}, allowed=(401, 403))
-        self.call("DELETE", self.collection + "/" + self.app, self.management_auth, allowed=(409,))
+        self.call("DELETE", self.app_url, self.management_auth, allowed=(409,))
         self.notes.append("활성 개발 Gateway가 사용하는 워커 앱의 삭제를 HTTP 409로 거부")
         self.notes.append(f"개발 Gateway URL: {self.public_url}")
         self.expect_echo("v1 최초 호출", initial)
@@ -341,6 +340,47 @@ class Verification:
 
         await_state("테스트 Gateway 배포 해제", undeployed, 60)
 
+    def remove_worker_app(self):
+        matches = [worker["metadata"] for worker in self.raw(self.workers_path)["items"]
+                   if worker["metadata"]["name"] == self.worker_name]
+        ensure(len(matches) <= 1 and all(
+            metadata.get("uid") and metadata.get("annotations", {}).get(
+                "workerplatform.imprun.dev/worker-app-owner") == self.owner for metadata in matches
+        ), "테스트 HTTPWorker 소유권 불일치")
+
+        registrations = [app for app in self.registered_apps() if app.get("id") == self.app]
+        if registrations:
+            ensure(len(registrations) == 1 and registrations[0].get("name") == self.slug,
+                   "테스트 워커 앱 소유권 불일치")
+
+            def removed():
+                code, _, _ = self.call("DELETE", self.app_url, self.management_auth, allowed=(202, 204))
+                return code == 204
+
+            await_state("워커 앱 삭제 완료", removed, 60)
+            self.notes.append("워커 앱 삭제 API: HTTP 204")
+        else:
+            ensure(not matches, "등록이 없는 테스트 HTTPWorker가 있습니다")
+
+        ensure(not any(app.get("id") == self.app for app in self.registered_apps()),
+               "테스트 앱이 등록 목록에 남았습니다")
+        self.call("GET", self.development + "/target", self.management_auth, allowed=(404,))
+        await_state("HTTPWorker·HTTPRoute 정리", lambda: not any(
+            item["metadata"]["name"] == self.worker_name
+            for items in (self.raw(self.workers_path)["items"], self.kube_json("-n", NAMESPACE, "get", "httproutes")["items"])
+            for item in items), 60)
+        if matches:
+            # 삭제 전 시작한 조정이 있으면 90초 제한을 넘겨 종료될 때까지 기다린다.
+            time.sleep(95)
+        prefix = "wp-" + self.worker_name + "-"
+        for resource, singular in (("actors", "actor"), ("actor-templates", "actor-template")):
+            for entry in self.ate_objects(resource):
+                name = entry["metadata"]["name"]
+                if re.fullmatch(re.escape(prefix) + r"[a-f0-9]{18}", name):
+                    tool((*self.ate, "delete", singular, "-a", NAMESPACE, name))
+            await_state(f"{resource} 정리", lambda: not any(
+                entry["metadata"]["name"].startswith(prefix) for entry in self.ate_objects(resource)), 60)
+
     def cleanup(self):
         failures = []
         if self.may_have_api:
@@ -363,32 +403,7 @@ class Verification:
             failures.append("테스트 워커 앱 정리 보류")
         elif self.may_have_app:
             try:
-                workers = self.raw(self.workers_path)["items"]
-                matches = [item["metadata"] for item in workers if item["metadata"]["name"] == self.worker_name]
-                if matches:
-                    metadata = matches[0]
-                    ensure(metadata.get("annotations", {}).get("workerplatform.imprun.dev/worker-app-owner") == self.owner,
-                           "테스트 HTTPWorker 소유권 불일치")
-                    options = {"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": {"uid": metadata["uid"]}}
-                    tool((*self.kube, "delete", "--raw", self.workers_path + "/" + self.worker_name, "-f", "-"),
-                         stdin=json.dumps(options))
-                    await_state("HTTPWorker·HTTPRoute 정리", lambda: not any(
-                        item["metadata"]["name"] == self.worker_name
-                        for items in (self.raw(self.workers_path)["items"], self.kube_json("-n", NAMESPACE, "get", "httproutes")["items"])
-                        for item in items), 60)
-                    # 삭제 전 시작한 조정이 있으면 90초 제한을 넘겨 종료될 때까지 기다린다.
-                    time.sleep(95)
-                for resource, singular in (("actors", "actor"), ("actor-templates", "actor-template")):
-                    prefix = "wp-" + self.worker_name + "-"
-                    for entry in self.ate_objects(resource):
-                        name = entry["metadata"]["name"]
-                        if re.fullmatch(re.escape(prefix) + r"[a-f0-9]{18}", name):
-                            tool((*self.ate, "delete", singular, "-a", NAMESPACE, name))
-                    await_state(f"{resource} 정리", lambda: not any(
-                        entry["metadata"]["name"].startswith(prefix) for entry in self.ate_objects(resource)), 60)
-                owned = "organization_id = :'fixture_org' AND project_id = :'fixture_project' AND app_id = :'fixture_app' AND name = :'fixture_name'"
-                self.psql("DELETE FROM worker_apps WHERE " + owned + ";")
-                ensure(self.psql("SELECT count(*) FROM worker_apps WHERE " + owned + ";") == "0", "테스트 앱 저장 데이터가 남았습니다")
+                self.remove_worker_app()
             except (ValueError, KeyError, OSError, subprocess.SubprocessError):
                 failures.append("테스트 워커 앱")
         self.notes.append("정리: " + (", ".join(failures) + " 확인 실패" if failures else

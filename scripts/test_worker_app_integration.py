@@ -43,7 +43,7 @@ class ProductIntegrationTest(unittest.TestCase):
             credential.write_text("test-token", encoding="utf-8")
             config = {
                 key: "fixture" for key in ("organization_id", "project_id", "project", "profile",
-                                            "gateway", "pool", "pg_service_file", "pg_service")
+                                            "gateway", "pool")
             }
             config.update({
                 "worker_url": "https://worker.example.test",
@@ -164,6 +164,43 @@ class ProductIntegrationTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "정리하지 못했습니다"):
                     test.cleanup()
                 self.assertEqual(["GET"], [request.args[0] for request in call.call_args_list])
+
+            test.may_have_api = False
+            test.may_have_app = True
+            app = {"id": test.app, "name": test.slug, "projectId": config["project_id"]}
+            worker = {"metadata": {"name": test.worker_name, "uid": "test-uid", "annotations": {
+                "workerplatform.imprun.dev/worker-app-owner": test.owner,
+            }}}
+            worker_lists = [{"items": [worker]}, {"items": []}]
+            responses = [(200, [app], {}), (202, None, {}), (204, None, {}), (200, [], {}), (404, None, {})]
+            with (patch.object(test, "call", side_effect=responses) as call,
+                  patch.object(test, "raw", side_effect=worker_lists) as kube,
+                  patch.object(test, "kube_json", return_value={"items": []}),
+                  patch.object(test, "ate_objects", return_value=[]),
+                  patch.object(smoke.time, "sleep"),
+                  patch.object(smoke, "tool") as commands):
+                test.cleanup()
+                self.assertEqual([
+                    ("GET", test.collection, auth),
+                    ("DELETE", test.app_url, auth),
+                    ("DELETE", test.app_url, auth),
+                    ("GET", test.collection, auth),
+                    ("GET", test.development + "/target", auth),
+                ], [request.args for request in call.call_args_list])
+                self.assertEqual([(202, 204), (202, 204)], [
+                    request.kwargs["allowed"] for request in call.call_args_list if request.args[0] == "DELETE"
+                ])
+                self.assertEqual(2, kube.call_count)
+                commands.assert_not_called()
+            self.assertIn("워커 앱 삭제 API: HTTP 204", test.notes)
+
+            with (patch.object(test, "call", return_value=(200, [{**app, "name": "다른 실행의 앱"}], {})) as call,
+                  patch.object(test, "raw", return_value={"items": []}),
+                  patch.object(test, "ate_objects") as ate):
+                with self.assertRaisesRegex(ValueError, "정리하지 못했습니다"):
+                    test.cleanup()
+                call.assert_called_once_with("GET", test.collection, auth)
+                ate.assert_not_called()
 
     def test_requires_origin_without_userinfo_or_path(self):
         self.assertEqual("https://example.test", smoke.endpoint("https://example.test/"))
