@@ -1,5 +1,6 @@
 from email import policy
 from email.parser import BytesParser
+from io import StringIO
 import json
 import tempfile
 import unittest
@@ -10,6 +11,30 @@ from scripts import worker_app_integration as smoke
 
 
 class ProductIntegrationTest(unittest.TestCase):
+    def test_manual_dispatch_reports_missing_prerequisites(self):
+        for ref, enabled, api_sha, message in (
+            ("refs/heads/feature", "true", "2" * 40, "Worker Platform main"),
+            ("refs/heads/main", "false", "2" * 40, "ATE_INTEGRATION_ENABLED=true"),
+            ("refs/heads/main", "true", "abbrev", "전체 SHA"),
+        ):
+            with (self.subTest(ref=ref, enabled=enabled, api_sha=api_sha),
+                  patch.dict(smoke.os.environ, {"GITHUB_REF": ref, "PRODUCT_ATE_ENABLED": enabled}, clear=True),
+                  patch("sys.argv", ["worker_app_integration.py", "--check-dispatch", "1" * 40, api_sha]),
+                  patch("sys.stderr", new_callable=StringIO) as stderr,
+                  patch.object(smoke, "Verification") as verification,
+                  self.assertRaises(SystemExit) as error):
+                smoke.main()
+            self.assertEqual(2, error.exception.code)
+            self.assertIn(message, stderr.getvalue())
+            verification.assert_not_called()
+
+    def test_valid_manual_dispatch_checks_inputs_without_fixture_credentials(self):
+        with (patch.dict(smoke.os.environ, {"GITHUB_REF": "refs/heads/main", "PRODUCT_ATE_ENABLED": "true"}, clear=True),
+              patch("sys.argv", ["worker_app_integration.py", "--check-dispatch", "1" * 40, "2" * 40]),
+              patch.object(smoke, "Verification") as verification):
+            self.assertEqual(0, smoke.main())
+            verification.assert_not_called()
+
     def test_distinct_packages_and_actual_response_are_checked(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(smoke.os.environ, {
             "KUBE_CONTEXT": "isolated", "ATE_TOKEN_FILE": "/runner/ate-token",

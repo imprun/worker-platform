@@ -31,6 +31,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: 수동 워커 앱 검증 요청 확인
+        if: github.event_name == 'workflow_dispatch' && inputs.api_sha != ''
+        env:
+          PRODUCT_ATE_ENABLED: ${{ vars.ATE_INTEGRATION_ENABLED == 'true' }}
+          PRODUCT_API_SHA: ${{ inputs.api_sha }}
+        run: python3 scripts/worker_app_integration.py --check-dispatch "$GITHUB_SHA" "$PRODUCT_API_SHA"
       - id: scope
         run: python3 scripts/ate_integration.py "$BASE_REF" "$GITHUB_SHA"
 
