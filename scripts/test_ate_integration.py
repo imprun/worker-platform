@@ -21,6 +21,13 @@ class IntegrationGateTest(unittest.TestCase):
         with patch.object(gate, "output", side_effect=[paths, "+\tgo.ate.dev/substrate v1.1.0\n"]):
             self.assertEqual(sorted(paths.rstrip("\0").split("\0")), gate.changes("base", "head"))
 
+    def test_worker_app_server_requires_live_ate(self):
+        paths = ("cmd/run-api/main.go\0internal/workerapps/service.go\0"
+                 "internal/workerapps/schema.sql\0Dockerfile.run-api\0"
+                 "scripts/worker_app_integration.py\0")
+        with patch.object(gate, "output", return_value=paths):
+            self.assertEqual(sorted(paths.rstrip("\0").split("\0")), gate.changes("base", "head"))
+
     def test_no_change_run_skips_before_any_fixture_request(self):
         with (patch("sys.argv", ["ate_integration.py", "--run", "base"]),
               patch.object(gate, "resolve", side_effect=["base-sha", "head-sha"]),

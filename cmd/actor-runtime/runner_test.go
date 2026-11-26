@@ -159,3 +159,24 @@ func TestAppOutputBoundAppliesToCopiedStreams(t *testing.T) {
 		t.Fatalf("output limit did not apply: bytes=%d, error=%v", output.buffer.Len(), err)
 	}
 }
+
+func TestPackageDigestIdentifiesInvokeResponse(t *testing.T) {
+	const digest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	const reply = `{"hello":"world"}`
+	handler := withPackageDigest(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(reply))
+	}), digest)
+	for _, path := range []string{"/invoke", "/attempt"} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(reply))
+		r.Header.Set("X-Imprun-Worker-Package-Digest", "임의 헤더")
+		handler.ServeHTTP(w, r)
+		want := ""
+		if path == "/invoke" {
+			want = digest
+		}
+		if got := w.Header().Get("X-Imprun-Worker-Package-Digest"); w.Code != http.StatusOK || got != want || w.Body.String() != reply {
+			t.Fatalf("%s의 응답이 예상과 다릅니다: %d %q %s", path, w.Code, got, w.Body)
+		}
+	}
+}

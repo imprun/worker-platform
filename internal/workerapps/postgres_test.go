@@ -5,8 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -17,7 +20,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/rest"
 )
 
 func TestWorkerAppPostgresHTTP(t *testing.T) {
@@ -31,12 +37,13 @@ func TestWorkerAppPostgresHTTP(t *testing.T) {
 		t.Fatal("테스트 데이터베이스 연결 설정 오류")
 	}
 	t.Cleanup(pool.Close)
-	const namespace = "worker-dev"
 	var identity [16]byte
 	rand.Read(identity[:])
-	organization := "worker-app-http-test-" + hex.EncodeToString(identity[:])
+	suffix := hex.EncodeToString(identity[:])
+	organization := "worker-app-http-test-" + suffix
+	namespace := "worker-dev-" + suffix
 	profile := platform.WorkerProfileSpec{
-		Atespace: "worker-dev", WorkerPool: platform.ObjectName{Name: "arm", Namespace: "ate"},
+		Atespace: namespace, WorkerPool: platform.ObjectName{Name: "arm", Namespace: "ate"},
 		PoolID: "arm", Architecture: "arm64", SandboxClass: "gvisor", CPU: "20m", Memory: "64Mi",
 		RuntimeImage: "registry.example.test/runtime@sha256:" + strings.Repeat("1", 64),
 		Egress:       []platform.EgressRule{{Protocol: "tlsPassthrough", Hostname: "registry.example.test", Port: 443}},
@@ -45,7 +52,7 @@ func TestWorkerAppPostgresHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kube := fake.NewSimpleDynamicClient(runtime.NewScheme(), &unstructured.Unstructured{Object: map[string]any{
+	kube := workerAppTestKubernetes(t, namespace, &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": workerResource.GroupVersion().String(), "kind": "WorkerProfile",
 		"metadata": map[string]any{"name": "arm", "namespace": namespace}, "spec": profileSpec,
 	}})
@@ -82,11 +89,24 @@ func TestWorkerAppPostgresHTTP(t *testing.T) {
 		}
 		return ProjectScope{OrganizationID: organization, ProjectID: project}, nil
 	}, service)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
 	request := func(method, path, role, body string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, path, strings.NewReader(body))
-		r.Header.Set("X-Test-Role", role)
 		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, r)
+		r, err := http.NewRequestWithContext(ctx, method, server.URL+path, strings.NewReader(body))
+		if err == nil {
+			r.Header.Set("X-Test-Role", role)
+			var response *http.Response
+			response, err = server.Client().Do(r)
+			if err == nil {
+				defer response.Body.Close()
+				w.WriteHeader(response.StatusCode)
+				_, err = io.Copy(w, response.Body)
+			}
+		}
+		if err != nil {
+			t.Error("로컬 워커 앱 HTTP 요청 실패")
+		}
 		return w
 	}
 	check := func(w *httptest.ResponseRecorder, status int) {
@@ -145,8 +165,20 @@ func TestWorkerAppPostgresHTTP(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil || status.LatestAttempt.State != "queued" || status.Active != nil {
 		t.Fatalf("최초 배포 상태가 예상과 다릅니다: %+v, %v", status, err)
 	}
+	generation := resource.GetGeneration()
+	profileRef := map[string]any{"name": "arm", "uid": "fixture-profile", "generation": int64(1)}
 	resource.Object["status"] = map[string]any{
-		"active": map[string]any{"revision": "v1", "generation": int64(1)},
+		"observedGeneration": generation,
+		"observedProfile":    profileRef,
+		"active": map[string]any{
+			"generation": generation, "profile": profileRef, "revision": "v1",
+			"atespace": namespace, "actor": "test", "actorUID": "fixture-actor",
+			"worker": "test-worker", "workerPod": "test-worker-pod", "route": namespace + "/" + worker,
+		},
+		"conditions": []any{map[string]any{
+			"type": "Ready", "status": "True", "observedGeneration": generation,
+			"lastTransitionTime": time.Now().UTC().Format(time.RFC3339), "reason": "Published", "message": "테스트",
+		}},
 	}
 	if _, err := kube.Resource(workerResource).Namespace(namespace).UpdateStatus(ctx, resource, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
@@ -157,4 +189,85 @@ func TestWorkerAppPostgresHTTP(t *testing.T) {
 		target.URL != "https://"+id+".workers.example.test/invoke" || target.Revision != "v1" {
 		t.Fatalf("활성 앱 대상이 예상과 다릅니다: %+v, %v", target, err)
 	}
+	if resource.GetResourceVersion() != "" {
+		initial := request("GET", path, "read", "")
+		check(initial, http.StatusOK)
+		if err := json.Unmarshal(initial.Body.Bytes(), &status); err != nil || status.Active == nil || status.ResourceVersion == "" {
+			t.Fatalf("활성 버전과 리소스 버전이 필요합니다: %+v, %v", status, err)
+		}
+		originalVersion := status.ResourceVersion
+		update := func(digest string) *httptest.ResponseRecorder {
+			input, err := json.Marshal(DeployRequest{ResourceVersion: originalVersion, Package: &PackageChoice{
+				Repository: "registry.example.test/echo", Digest: digest,
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return request("PUT", path, "write", string(input))
+		}
+		next := "sha256:" + strings.Repeat("3", 64)
+		check(update(next), http.StatusAccepted)
+		check(update(next), http.StatusAccepted)
+		check(update("sha256:"+strings.Repeat("4", 64)), http.StatusConflict)
+		latest := request("GET", path, "read", "")
+		check(latest, http.StatusOK)
+		if err := json.Unmarshal(latest.Body.Bytes(), &status); err != nil || status.Active == nil ||
+			status.Active.Revision != "v1" || status.LatestAttempt.State != "queued" ||
+			status.LatestAttempt.AppPackage != "registry.example.test/echo@"+next ||
+			status.LatestAttempt.Generation <= status.Active.Generation {
+			t.Fatalf("v2 준비 중 v1이 보존되어야 합니다: %+v, %v", status, err)
+		}
+	}
+
+}
+
+// workerAppTestKubernetes는 루프백 주소의 전용 API 서버에서만 실제 리소스를 만든다.
+func workerAppTestKubernetes(t *testing.T, namespace string, profile *unstructured.Unstructured) dynamic.Interface {
+	t.Helper()
+	path := os.Getenv("WORKER_APP_TEST_KUBE_FILE")
+	if path == "" {
+		return fake.NewSimpleDynamicClient(runtime.NewScheme(), profile)
+	}
+	var settings struct {
+		Host     string
+		CAData   []byte
+		CertData []byte
+		KeyData  []byte
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || json.Unmarshal(data, &settings) != nil {
+		t.Fatal("격리된 테스트 Kubernetes 연결 설정을 읽을 수 없습니다")
+	}
+	target, err := url.Parse(settings.Host)
+	if err != nil || target.Scheme != "https" || !net.ParseIP(target.Hostname()).IsLoopback() || len(settings.CAData) == 0 {
+		t.Fatal("테스트에는 TLS로 검증된 루프백 Kubernetes API가 필요합니다")
+	}
+	config := &rest.Config{Host: settings.Host, TLSClientConfig: rest.TLSClientConfig{
+		CAData: settings.CAData, CertData: settings.CertData, KeyData: settings.KeyData,
+	}}
+	client, err := dynamic.NewForConfig(config)
+	if err != nil {
+		t.Fatal("테스트 Kubernetes 클라이언트 생성 실패")
+	}
+	namespaces := client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "namespaces"})
+	created, err := namespaces.Create(t.Context(), &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]any{"name": namespace},
+	}}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		uid := created.GetUID()
+		if err := namespaces.Delete(ctx, namespace, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}}); err != nil {
+			t.Errorf("테스트 네임스페이스 정리 실패: %v", err)
+		}
+	})
+	profileResource := workerResource
+	profileResource.Resource = "workerprofiles"
+	if _, err := client.Resource(profileResource).Namespace(namespace).Create(t.Context(), profile, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	return client
 }

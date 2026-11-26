@@ -29,6 +29,16 @@ func main() {
 	}
 }
 
+// 호출 증거에는 런타임이 검증한 OCI digest를 기록한다. 앱의 JSON 응답은 그대로 둔다.
+func withPackageDigest(handler http.Handler, digest string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/invoke" {
+			w.Header().Set("X-Imprun-Worker-Package-Digest", digest)
+		}
+		handler.ServeHTTP(w, r)
+	})
+}
+
 func run(ctx context.Context, address string) error {
 	ref, err := apppackage.ParseReference(os.Getenv(apppackage.ReferenceEnv))
 	if err != nil {
@@ -70,7 +80,7 @@ func run(ctx context.Context, address string) error {
 
 	server := &http.Server{
 		Addr:              address,
-		Handler:           runner.routes(),
+		Handler:           withPackageDigest(runner.routes(), ref.Digest),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      100 * time.Second,
