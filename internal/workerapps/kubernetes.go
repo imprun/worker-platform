@@ -52,12 +52,13 @@ func (target DevelopmentTarget) SubmitDevelopment(
 		}}
 		desired.SetName(name)
 		desired.SetNamespace(worker.Metadata.Namespace)
-		desired.SetAnnotations(map[string]string{appOwnerAnnotation: owner})
-		created, createErr := workers.Create(ctx, desired, metav1.CreateOptions{})
-		if !apierrors.IsAlreadyExists(createErr) {
-			return created, createErr
+		desired.SetAnnotations(map[string]string{
+			appOwnerAnnotation: owner, platform.WorkerAppSubmissionPendingAnnotation: "true",
+		})
+		current, err = workers.Create(ctx, desired, metav1.CreateOptions{})
+		if apierrors.IsAlreadyExists(err) {
+			current, err = workers.Get(ctx, name, metav1.GetOptions{})
 		}
-		current, err = workers.Get(ctx, name, metav1.GetOptions{})
 	}
 	if apierrors.IsNotFound(err) {
 		return nil, ErrDeploymentChanged
@@ -75,17 +76,21 @@ func (target DevelopmentTarget) SubmitDevelopment(
 	unchanged := reflect.DeepEqual(before, spec)
 	annotations := current.GetAnnotations()
 	if unchanged && (!retry || expectedVersion != "" && annotations[platform.DeploymentRetryAnnotation] == expectedVersion) {
-		return current, nil
-	}
-	if expectedVersion == "" || current.GetResourceVersion() != expectedVersion || retry && !unchanged {
-		return nil, ErrDeploymentChanged
-	}
-	if retry {
-		annotations[platform.DeploymentRetryAnnotation] = expectedVersion
-		current.SetAnnotations(annotations)
+		if annotations[platform.WorkerAppSubmissionPendingAnnotation] == "" {
+			return current, nil
+		}
 	} else {
-		current.Object["spec"] = spec
+		if expectedVersion == "" || current.GetResourceVersion() != expectedVersion || retry && !unchanged {
+			return nil, ErrDeploymentChanged
+		}
+		if retry {
+			annotations[platform.DeploymentRetryAnnotation] = expectedVersion
+		} else {
+			current.Object["spec"] = spec
+		}
 	}
+	delete(annotations, platform.WorkerAppSubmissionPendingAnnotation)
+	current.SetAnnotations(annotations)
 	updated, err := workers.Update(ctx, current, metav1.UpdateOptions{})
 	if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
 		return nil, ErrDeploymentChanged

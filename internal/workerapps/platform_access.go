@@ -14,11 +14,11 @@ import (
 var projectHandle = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
 // PlatformProjectAccess는 API Platform이 인증한 고정 조직·프로젝트 ID만 사용한다.
-func PlatformProjectAccess(endpoint string) (ProjectAccess, error) {
+func PlatformProjectAccess(endpoint string) (ProjectAccess, RetirementAccess, error) {
 	base, err := url.Parse(endpoint)
 	if err != nil || base.Scheme != "https" || base.Hostname() == "" ||
 		base.User != nil || base.RawQuery != "" || base.Fragment != "" {
-		return nil, errors.New("API Platform 권한 서버의 HTTPS 주소가 필요합니다")
+		return nil, nil, errors.New("API Platform 권한 서버의 HTTPS 주소가 필요합니다")
 	}
 	client := &http.Client{
 		Timeout: 5 * time.Second,
@@ -26,7 +26,7 @@ func PlatformProjectAccess(endpoint string) (ProjectAccess, error) {
 			return http.ErrUseLastResponse
 		},
 	}
-	return platformProjectAccess(base, client), nil
+	return platformProjectAccess(base, client), platformRetirementAccess(base, client), nil
 }
 
 func platformProjectAccess(base *url.URL, client *http.Client) ProjectAccess {
@@ -74,5 +74,35 @@ func platformProjectAccess(base *url.URL, client *http.Client) ProjectAccess {
 		default:
 			return ProjectScope{}, errors.New("API Platform 프로젝트 권한을 확인하지 못했습니다")
 		}
+	}
+}
+
+func platformRetirementAccess(base *url.URL, client *http.Client) RetirementAccess {
+	return func(r *http.Request, scope ProjectScope, appID, requestID string) error {
+		target := base.JoinPath("api/v0.9/projects", r.PathValue("project"), "worker-apps", appID, "retirement")
+		request, err := http.NewRequestWithContext(r.Context(), http.MethodPut, target.String(), nil)
+		if err != nil {
+			return ErrRetirementUnavailable
+		}
+		request.Header.Set("Authorization", r.Header.Get("Authorization"))
+		request.Header.Set("X-Org-Id", scope.OrganizationID)
+		request.Header.Set(deletionRequestHeader, requestID)
+		response, err := client.Do(request)
+		if err != nil {
+			return ErrRetirementUnavailable
+		}
+		defer response.Body.Close()
+		if response.StatusCode == http.StatusNoContent {
+			return nil
+		}
+		if response.StatusCode == http.StatusConflict {
+			var result struct {
+				Code string `json:"code"`
+			}
+			if json.NewDecoder(io.LimitReader(response.Body, 8192)).Decode(&result) == nil && result.Code == "ARTIFACT_DEPLOYED" {
+				return ErrAppInUse
+			}
+		}
+		return ErrRetirementUnavailable
 	}
 }

@@ -2,6 +2,7 @@ package workerapps
 
 import (
 	"context"
+	"crypto/rand"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -55,6 +56,19 @@ func (s *Service) Register(ctx context.Context, scope ProjectScope, input Regist
 	if err != nil {
 		return App{}, err
 	}
+	var retired bool
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM worker_apps WHERE organization_id = $1 AND project_id = $2 AND app_id = $3 AND deleted_at IS NOT NULL
+	)`, scope.OrganizationID, scope.ProjectID, id).Scan(&retired); err != nil {
+		return App{}, err
+	}
+	if retired {
+		var generation [18]byte
+		if _, err := rand.Read(generation[:]); err != nil {
+			return App{}, err
+		}
+		id = fmt.Sprintf("app-%x", generation[:])
+	}
 	target, profile, err := s.resolveProfile(ctx, scope, id, input.Profile)
 	if err != nil {
 		return App{}, err
@@ -71,16 +85,21 @@ func (s *Service) Register(ctx context.Context, scope ProjectScope, input Regist
 	if err != nil {
 		return App{}, err
 	}
-	app, err := s.app(ctx, scope, id)
-	if err == nil && app.Registration != input {
+	app, err := scanApp(s.db.QueryRow(ctx, `SELECT `+appColumns+`
+		FROM worker_apps WHERE organization_id = $1 AND project_id = $2 AND name = $3 AND deleted_at IS NULL`,
+		scope.OrganizationID, scope.ProjectID, input.Name))
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && app.Registration != input {
 		return App{}, ErrDeploymentChanged
+	}
+	if err == nil && app.DeletionRequested {
+		return App{}, ErrDeletionPending
 	}
 	return app, err
 }
 
 func (s *Service) List(ctx context.Context, scope ProjectScope) ([]App, error) {
-	rows, err := s.db.Query(ctx, `SELECT app_id, project_id, name, profile, package
-		FROM worker_apps WHERE organization_id = $1 AND project_id = $2 ORDER BY name`,
+	rows, err := s.db.Query(ctx, `SELECT `+appColumns+`
+		FROM worker_apps WHERE organization_id = $1 AND project_id = $2 AND deleted_at IS NULL ORDER BY name`,
 		scope.OrganizationID, scope.ProjectID)
 	if err != nil {
 		return nil, err
@@ -100,28 +119,42 @@ func (s *Service) Status(ctx context.Context, scope ProjectScope, id string) (De
 }
 
 func (s *Service) Deploy(ctx context.Context, scope ProjectScope, id string, request DeployRequest) (DevelopmentStatus, error) {
-	app, err := s.app(ctx, scope, id)
+	var target DevelopmentTarget
+	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		app, err := scanApp(tx.QueryRow(ctx, appByID+" FOR UPDATE", scope.OrganizationID, scope.ProjectID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrDeploymentNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if app.DeletionRequested {
+			return ErrDeletionPending
+		}
+		resolved, profile, err := s.resolveProfile(ctx, scope, id, app.Profile)
+		if err != nil {
+			return err
+		}
+		target = resolved
+		choice := app.Package
+		if request.Package != nil {
+			choice = *request.Package
+		}
+		_, err = target.SubmitDevelopment(ctx, s.kube, scope.OrganizationID, scope.ProjectID, id, request.ResourceVersion, profile, choice, request.Retry)
+		return err
+	})
 	if err != nil {
-		return DevelopmentStatus{}, err
-	}
-	target, profile, err := s.resolveProfile(ctx, scope, id, app.Profile)
-	if err != nil {
-		return DevelopmentStatus{}, err
-	}
-	choice := app.Package
-	if request.Package != nil {
-		choice = *request.Package
-	}
-	if _, err := target.SubmitDevelopment(ctx, s.kube, scope.OrganizationID, scope.ProjectID, id, request.ResourceVersion, profile, choice, request.Retry); err != nil {
 		return DevelopmentStatus{}, err
 	}
 	return target.ReadDevelopment(ctx, s.kube, scope.OrganizationID, scope.ProjectID, id)
 }
 
+const appColumns = "app_id, project_id, name, profile, package, deletion_request"
+const appByID = `SELECT ` + appColumns + `
+	FROM worker_apps WHERE organization_id = $1 AND project_id = $2 AND app_id = $3 AND deleted_at IS NULL`
+
 func (s *Service) app(ctx context.Context, scope ProjectScope, id string) (App, error) {
-	app, err := scanApp(s.db.QueryRow(ctx, `SELECT app_id, project_id, name, profile, package
-		FROM worker_apps WHERE organization_id = $1 AND project_id = $2 AND app_id = $3`,
-		scope.OrganizationID, scope.ProjectID, id))
+	app, err := scanApp(s.db.QueryRow(ctx, appByID, scope.OrganizationID, scope.ProjectID, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return App{}, ErrDeploymentNotFound
 	}
@@ -130,7 +163,8 @@ func (s *Service) app(ctx context.Context, scope ProjectScope, id string) (App, 
 
 func scanApp(row pgx.Row) (App, error) {
 	var app App
-	err := row.Scan(&app.ID, &app.ProjectID, &app.Name, &app.Profile, &app.Package)
+	err := row.Scan(&app.ID, &app.ProjectID, &app.Name, &app.Profile, &app.Package, &app.deletionRequest)
+	app.DeletionRequested = app.deletionRequest != ""
 	return app, err
 }
 

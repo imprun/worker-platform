@@ -2,6 +2,7 @@ package workerapps
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -23,6 +24,10 @@ type ProjectScope struct {
 // ProjectAccess는 인증 정보를 확인하고 서버가 저장한 조직 및 프로젝트 ID를 반환한다.
 type ProjectAccess func(r *http.Request, project string, write bool) (ProjectScope, error)
 
+type RetirementAccess func(r *http.Request, scope ProjectScope, appID, requestID string) error
+
+const deletionRequestHeader = "X-Worker-App-Deletion-Request"
+
 type Registration struct {
 	Name    string        `json:"name"`
 	Profile string        `json:"profile"`
@@ -30,9 +35,12 @@ type Registration struct {
 }
 
 type App struct {
-	ID        string `json:"id"`
-	ProjectID string `json:"projectId"`
+	ID                string `json:"id"`
+	ProjectID         string `json:"projectId"`
+	DeletionRequested bool   `json:"deletionRequested,omitempty"`
+	DeletionSupported bool   `json:"deletionSupported,omitempty"`
 	Registration
+	deletionRequest string
 }
 
 type DeployRequest struct {
@@ -48,9 +56,10 @@ type AppService interface {
 	Deploy(context.Context, ProjectScope, string, DeployRequest) (DevelopmentStatus, error)
 	LinkTarget(context.Context, ProjectScope, string) (LinkTarget, error)
 	Invoke(context.Context, ProjectScope, string, json.RawMessage) (InvocationResult, error)
+	Delete(context.Context, ProjectScope, string, func(string) error) (bool, error)
 }
 
-func Handler(access ProjectAccess, service AppService) http.Handler {
+func Handler(access ProjectAccess, service AppService, retire RetirementAccess) http.Handler {
 	mux := http.NewServeMux()
 	const collection = "/projects/{project}/worker-apps"
 	const development = collection + "/{app}/environments/development"
@@ -67,7 +76,28 @@ func Handler(access ProjectAccess, service AppService) http.Handler {
 		if apps == nil {
 			apps = []App{}
 		}
+		for i := range apps {
+			apps[i].DeletionSupported = retire != nil
+		}
 		return respond(w, http.StatusOK, apps, err)
+	}))
+	mux.HandleFunc("DELETE "+collection+"/{app}", scoped(access, true, func(w http.ResponseWriter, r *http.Request, scope ProjectScope) error {
+		if retire == nil {
+			return ErrRetirementUnavailable
+		}
+		appID := r.PathValue("app")
+		removed, err := service.Delete(r.Context(), scope, appID, func(requestID string) error {
+			return retire(r, scope, appID, requestID)
+		})
+		if err != nil {
+			return err
+		}
+		if removed {
+			w.WriteHeader(http.StatusNoContent)
+		} else {
+			w.WriteHeader(http.StatusAccepted)
+		}
+		return nil
 	}))
 	mux.HandleFunc("GET "+development, scoped(access, false, func(w http.ResponseWriter, r *http.Request, scope ProjectScope) error {
 		status, err := service.Status(r.Context(), scope, r.PathValue("app"))
@@ -91,6 +121,9 @@ func Handler(access ProjectAccess, service AppService) http.Handler {
 	}))
 	mux.HandleFunc("GET "+development+"/target", scoped(access, false, func(w http.ResponseWriter, r *http.Request, scope ProjectScope) error {
 		target, err := service.LinkTarget(r.Context(), scope, r.PathValue("app"))
+		if target.DeletionRequested && len(r.Header.Values(deletionRequestHeader)) == 1 {
+			target.DeletionVerified = subtle.ConstantTimeCompare([]byte(target.deletionRequest), []byte(r.Header.Get(deletionRequestHeader))) == 1
+		}
 		return respond(w, http.StatusOK, target, err)
 	}))
 
@@ -123,6 +156,9 @@ func scoped(access ProjectAccess, write bool, handle func(http.ResponseWriter, *
 			{ErrInvalidJSON, http.StatusBadRequest},
 			{ErrDeploymentNotReady, http.StatusConflict},
 			{ErrInvocation, http.StatusBadGateway},
+			{ErrAppInUse, http.StatusConflict},
+			{ErrDeletionPending, http.StatusConflict},
+			{ErrRetirementUnavailable, http.StatusServiceUnavailable},
 		} {
 			if errors.Is(err, expected.err) {
 				code, message = expected.code, expected.err.Error()

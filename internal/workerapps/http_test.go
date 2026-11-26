@@ -15,6 +15,7 @@ func TestWorkerAppHTTPDeniesAccessBeforeCallingService(t *testing.T) {
 	}{
 		{http.MethodPost, base, true},
 		{http.MethodGet, base, false},
+		{http.MethodDelete, base + "/app", true},
 		{http.MethodGet, base + "/app/environments/development", false},
 		{http.MethodPut, base + "/app/environments/development", true},
 		{http.MethodPost, base + "/app/environments/development/invoke", true},
@@ -24,7 +25,7 @@ func TestWorkerAppHTTPDeniesAccessBeforeCallingService(t *testing.T) {
 				t.Fatalf("요청의 프로젝트나 변경 권한이 다릅니다: %q, %v", project, write)
 			}
 			return ProjectScope{}, ErrForbidden
-		}, nil)
+		}, nil, nil)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(entry.method, entry.path, strings.NewReader("{}")))
 		if response.Code != http.StatusForbidden {

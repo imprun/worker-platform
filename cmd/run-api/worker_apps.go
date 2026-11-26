@@ -43,7 +43,7 @@ func openWorkerApps(ctx context.Context, configFile, dsnFile, namespace string) 
 	if err := json.Unmarshal(data, &config); err != nil || config.Domain == "" || len(config.Projects) == 0 {
 		return nil, nil, errors.New("워커 앱 개발 도메인과 프로젝트 설정을 확인하세요")
 	}
-	access, err := workerapps.PlatformProjectAccess(config.PlatformURL)
+	access, retire, err := workerapps.PlatformProjectAccess(config.PlatformURL)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -97,5 +97,5 @@ func openWorkerApps(ctx context.Context, configFile, dsnFile, namespace string) 
 			return workerapps.ProjectScope{}, workerapps.ErrForbidden
 		}
 		return scope, err
-	}, service), pool.Close, nil
+	}, service, retire), pool.Close, nil
 }

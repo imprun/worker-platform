@@ -9,16 +9,20 @@ import (
 
 // LinkTarget은 API 연산이 추종할 앱의 개발 대상이다.
 type LinkTarget struct {
-	AppID       string        `json:"appId"`
-	ProjectID   string        `json:"projectId"`
-	Environment string        `json:"environment"`
-	Operation   HTTPOperation `json:"operation"`
-	URL         string        `json:"url,omitempty"`
-	Revision    string        `json:"revision,omitempty"`
+	AppID             string        `json:"appId"`
+	ProjectID         string        `json:"projectId"`
+	Environment       string        `json:"environment"`
+	Operation         HTTPOperation `json:"operation"`
+	URL               string        `json:"url,omitempty"`
+	Revision          string        `json:"revision,omitempty"`
+	DeletionRequested bool          `json:"deletionRequested,omitempty"`
+	DeletionVerified  bool          `json:"deletionVerified,omitempty"`
+	deletionRequest   string
 }
 
 func (s *Service) LinkTarget(ctx context.Context, scope ProjectScope, id string) (LinkTarget, error) {
-	if _, err := s.app(ctx, scope, id); err != nil {
+	app, err := s.app(ctx, scope, id)
+	if err != nil {
 		return LinkTarget{}, err
 	}
 	target, err := s.target(ctx, scope, id)
@@ -27,7 +31,11 @@ func (s *Service) LinkTarget(ctx context.Context, scope ProjectScope, id string)
 	}
 	link := LinkTarget{
 		AppID: id, ProjectID: scope.ProjectID, Environment: "development",
-		Operation: HTTPOperation{Method: http.MethodPost, Path: "/invoke"},
+		Operation:         HTTPOperation{Method: http.MethodPost, Path: "/invoke"},
+		DeletionRequested: app.DeletionRequested, deletionRequest: app.deletionRequest,
+	}
+	if link.DeletionRequested {
+		return link, nil
 	}
 	status, err := target.ReadDevelopment(ctx, s.kube, scope.OrganizationID, scope.ProjectID, id)
 	if errors.Is(err, ErrDeploymentNotFound) {

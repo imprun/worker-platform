@@ -10,9 +10,12 @@ metadata:
 rules:
   - apiGroups: [workerplatform.imprun.dev]
     resources: [httpworkers]
-    verbs: [get, create, update]
+    verbs: [get, create, update, delete]
   - apiGroups: [workerplatform.imprun.dev]
     resources: [workerprofiles]
+    verbs: [get]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [httproutes]
     verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

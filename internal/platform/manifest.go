@@ -14,6 +14,9 @@ import (
 const WorkerVersion = "workerplatform.imprun.dev/v1alpha2"
 const DeploymentRetryAnnotation = "workerplatform.imprun.dev/deployment-retry"
 
+// WorkerAppSubmissionPendingAnnotation은 Run API가 최초 생성 응답을 확인하기 전 게시를 막는다.
+const WorkerAppSubmissionPendingAnnotation = "workerplatform.imprun.dev/worker-app-submission-pending"
+
 type Worker struct {
 	APIVersion string     `yaml:"apiVersion"`
 	Kind       string     `yaml:"kind"`

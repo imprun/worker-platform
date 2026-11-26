@@ -175,7 +175,8 @@ func (c Controller) reconcile(ctx context.Context, name string) error {
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
-	exists := err == nil && worker.GetDeletionTimestamp() == nil
+	exists := err == nil && worker.GetDeletionTimestamp() == nil &&
+		worker.GetAnnotations()[platform.WorkerAppSubmissionPendingAnnotation] == ""
 	if c.jobs != nil {
 		var uid, priorRevision string
 		var enabled bool
@@ -273,5 +274,6 @@ func checkCurrent(ctx context.Context, resource dynamic.ResourceInterface, used 
 }
 
 func sameRevision(a, b *unstructured.Unstructured) bool {
-	return a.GetUID() == b.GetUID() && a.GetGeneration() == b.GetGeneration()
+	return a.GetUID() == b.GetUID() && a.GetGeneration() == b.GetGeneration() &&
+		a.GetAnnotations()[platform.WorkerAppSubmissionPendingAnnotation] == b.GetAnnotations()[platform.WorkerAppSubmissionPendingAnnotation]
 }

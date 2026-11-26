@@ -65,6 +65,33 @@ func TestDevelopmentDeployment(t *testing.T) {
 	if _, err := target.Deployment(example.Metadata.Name, foreign, custom); err == nil {
 		t.Fatal("다른 프로젝트의 프로필을 승인했습니다")
 	}
+	t.Run("최초 생성만 확인되면 게시를 대기한다", func(t *testing.T) {
+		client := fake.NewSimpleDynamicClient(runtime.NewScheme())
+		confirmationFailed := false
+		client.PrependReactor("update", workerResource.Resource, func(kubetesting.Action) (bool, runtime.Object, error) {
+			if !confirmationFailed {
+				confirmationFailed = true
+				return true, nil, errors.New("테스트용 게시 확인 실패")
+			}
+			return false, nil, nil
+		})
+		ctx := t.Context()
+		if _, err := target.SubmitDevelopment(ctx, client, "org", "project", "app", "", profile, custom, false); err == nil {
+			t.Fatal("게시 확인 오류를 반환해야 합니다")
+		}
+		name, _, err := deploymentIdentity("org", "project", "app")
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidate, err := client.Resource(workerResource).Namespace(target.Namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil || candidate.GetAnnotations()[platform.WorkerAppSubmissionPendingAnnotation] == "" {
+			t.Fatalf("확인하지 못한 생성은 게시할 수 없습니다: %v", err)
+		}
+		confirmed, err := target.SubmitDevelopment(ctx, client, "org", "project", "app", "", profile, custom, false)
+		if err != nil || confirmed.GetAnnotations()[platform.WorkerAppSubmissionPendingAnnotation] != "" {
+			t.Fatalf("같은 요청이 기존 HTTPWorker의 게시를 확인해야 합니다: %v", err)
+		}
+	})
 	t.Run("HTTPWorker 재시도와 업데이트", func(t *testing.T) {
 		ctx := t.Context()
 		client := fake.NewSimpleDynamicClient(runtime.NewScheme())
