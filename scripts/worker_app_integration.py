@@ -419,7 +419,7 @@ def main():
     args = parser.parse_args()
     if args.check_dispatch:
         if os.environ.get("GITHUB_REF") != "refs/heads/main":
-            parser.error("워커 앱 실환경 검증은 Worker Platform main에서 실행하세요")
+            parser.error("워커 앱 실환경 검증은 main 브랜치에서 실행하세요")
         if os.environ.get("PRODUCT_ATE_ENABLED") != "true":
             parser.error("워커 앱 실환경 검증에 ATE_INTEGRATION_ENABLED=true가 필요합니다")
         if not SHA.fullmatch(args.worker_sha) or not SHA.fullmatch(args.api_sha):

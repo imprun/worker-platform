@@ -13,7 +13,7 @@ from scripts import worker_app_integration as smoke
 class ProductIntegrationTest(unittest.TestCase):
     def test_manual_dispatch_reports_missing_prerequisites(self):
         for ref, enabled, api_sha, message in (
-            ("refs/heads/feature", "true", "2" * 40, "Worker Platform main"),
+            ("refs/heads/feature", "true", "2" * 40, "main 브랜치"),
             ("refs/heads/main", "false", "2" * 40, "ATE_INTEGRATION_ENABLED=true"),
             ("refs/heads/main", "true", "abbrev", "전체 SHA"),
         ):

@@ -2,7 +2,7 @@
 
 검증 범위는 [워커 앱 제품 목표 #1](https://github.com/imprun/worker-platform/issues/1)과 [실환경 검증 #4](https://github.com/imprun/worker-platform/issues/4)이다. 실행마다 워커 저장소와 API 저장소의 전체 SHA를 함께 남긴다.
 
-## 현재 검증 근거
+## 초기 검증 근거
 
 - 개발 Kubernetes API `v1.36.6`에 지정 TCP CONNECT 프록시를 통해 접속했다. kubeconfig CA와 서버 이름 검증을 유지했다. `ate-system`과 `HTTPRoute` 정의는 조회됐고, `wp-echo-example`, `HTTPWorker`, `WorkerProfile`은 `404`를 반환했다. 클러스터는 변경하지 않았다.
 - [Echo PR #5](https://github.com/imprun/worker-platform/pull/5)에서 로컬 `POST /invoke`의 HTTP 200, 원본과 같은 JSON 값, Actor 로컬 `requests.jsonl` 기록을 확인했다. PR의 JSON Echo 패키지가 개발계에 올라가야 동일 계약을 실환경에서 재검증할 수 있다.
@@ -32,15 +32,20 @@
 
 ## GitHub Actions 실행
 
-워커 제품 검증은 기존 `ATE integration`의 별도 작업이다. 워커 `main`에서 기존 `ATE_INTEGRATION_ENABLED=true` 조건을 사용한다. 워커 변경으로 자동 실행할 때는 저장소 변수 `ATE_PRODUCT_API_SHA`에 함께 검증할 API Platform의 전체 SHA를 설정한다. API Platform만 변경된 경우에는 워커 `main`에서 수동 실행하고 `base`에는 현재 워커 `main` SHA, `api_sha`에는 새 API Platform 전체 SHA를 입력한다. 워커 변경 감지가 비어도 제품 작업을 실행한다. 러너 공유 잠금으로 기존 ATE 스모크와 동시에 실행하지 않는다.
+워커 변경 감지가 선택한 `main` 커밋은 Worker Platform의 `ATE integration`에서 `워커 앱 ARM64 검증 후보 빌드`를 실행한다. 워크플로, 이미지 레시피 또는 후보 패키징 스크립트가 변경된 PR도 같은 빌드와 검증을 실행한다. 아티팩트는 `main` 실행에서 보존한다. 같은 커밋을 다시 빌드하려면 워커 `main`의 수동 실행에서 `base`에 현재 `main` SHA를 입력하고 `build_worker_artifacts`를 켠다.
 
-`api_sha`를 지정한 수동 실행에서는 호스팅 러너가 먼저 `main`, `ATE_INTEGRATION_ENABLED=true`와 두 저장소 SHA의 형식을 검사한다. 조건이 빠지면 대기열에 실환경 작업을 보내기 전에 해당 조건을 표시하고 실패 처리한다.
+`worker-app-arm64-<SHA>-<실행 시도 번호>` 아티팩트에는 Run API, 워커 컨트롤러, 공통 Actor 런타임의 OCI 아카이브와 Echo v1·실패 후보·v2의 OCI 레이아웃이 들어 있다. `source-revision.txt`, `images.txt`, `packages.txt`에서 SHA와 이미지·패키지 digest를 확인한다. API Platform `main`의 ARM64 빌드는 `build_worker_app_gateway=true` 옵션으로 Platform API·콘솔, Gateway 컨트롤러·런타임 번들을 보존할 수 있다. 각 아티팩트에서 `sha256sum -c SHA256SUMS`를 실행하고 승인된 시험 레지스트리의 digest를 대조한다. [API Platform ARM64 빌드](https://github.com/imprun/api-platform/actions/workflows/build-imprun-operator-oci.yml)
 
-워커 변경 감지가 선택한 `main` 커밋은 호스팅 러너에서 `워커 앱 ARM64 검증 후보 빌드` 작업을 실행한다. 워크플로, 이미지 레시피 또는 후보 패키징 스크립트가 변경된 PR도 같은 빌드와 검증을 실행한다. 아티팩트는 `main` 실행에서 보존한다. 같은 커밋을 다시 빌드하려면 워커 `main`의 수동 실행에서 `base`에 현재 `main` SHA를 입력하고 `build_worker_artifacts`를 켠다. 후보 빌드만 실행할 때는 `api_sha`를 비운다.
+검토한 두 커밋을 전용 `wp-product-verification` 네임스페이스에 배포한다. Run API, 워커 컨트롤러, API Platform, 개발 Gateway Deployment에 `spec.template.metadata.annotations.imprun.dev/source-sha`와 이미지 digest를 고정한다. API Gateway 등록의 ID·버전 및 HTTPS 엔드포인트도 시험 구성과 일치해야 한다.
 
-`worker-app-arm64-<SHA>-<실행 시도 번호>` 아티팩트에는 Run API, 워커 컨트롤러, 공통 Actor 런타임의 OCI 아카이브와 Echo v1·실패 후보·v2의 OCI 레이아웃이 들어 있다. 작업이 검증한 이미지 소스 SHA와 ARM64 메타데이터, 이미지·패키지 digest는 `source-revision.txt`, `images.txt`, `packages.txt`에서 확인한다. 다운로드한 파일은 `sha256sum -c SHA256SUMS`로 검증한다. 같이 검증할 API Platform 커밋은 해당 저장소의 기존 ARM64 빌드에서 `upload_bundle=true`로 보존한다. 두 아티팩트를 읽고 승인된 시험 레지스트리에서 digest를 대조한 다음 전용 환경을 준비한다. [API Platform ARM64 빌드](https://github.com/imprun/api-platform/actions/workflows/build-imprun-operator-oci.yml)
+워커 앱의 실환경 검증은 기존 `imprun-oci-builds` 그룹이 연결된 API Platform `main`에서 수동 실행한다. API Platform 저장소의 `ATE_INTEGRATION_ENABLED=true`와 두 저장소 `main`에 병합된 전체 SHA가 필요하다. API Platform만 바뀌었을 때도 실제 배포한 Worker SHA와 새 API SHA를 지정한다. Worker 변경 감지와 실환경 수동 실행은 독립적으로 실행된다. [워커 앱 개발 Gateway 검증](https://github.com/imprun/api-platform/actions/workflows/verify-worker-app-development.yml)
 
-Actions의 워커 제품 작업은 Kubernetes의 기존 ARC 러너 세트를 사용한다. `imprun-oci-builds` 그룹의 `arc-runner-set-imprun`을 선택해 이미 준비된 테스트 서비스에 연결한다. 검토한 두 커밋을 빌드한 뒤 전용 `wp-product-verification` 네임스페이스에 배포한다. Run API, 워커 컨트롤러, API Platform, 개발 Gateway Deployment에는 `spec.template.metadata.annotations.imprun.dev/source-sha`와 이미지 digest를 고정한다. API Gateway 등록의 ID·버전 및 HTTPS 엔드포인트도 테스트 구성과 일치해야 한다. 일반 워커 Echo 스모크의 `wp-echo-example` 리소스는 제품 실행에서 사용하지 않는다.
+```sh
+gh workflow run verify-worker-app-development.yml -R imprun/api-platform --ref main \
+  -f worker_sha=WORKER_FULL_SHA -f api_sha=API_FULL_SHA
+```
+
+이 경로는 Kubernetes의 같은 `arc-runner-set-imprun`에서 전용 테스트 서비스에 연결한다. 일반 ATE 스모크는 Worker Platform에서 기존 `main`·변경 감지·`ATE_INTEGRATION_ENABLED` 조건으로 실행한다. 해당 스모크의 환경은 `wp-echo-example`이다.
 
 러너에 `KUBE_CONTEXT`, `ATE_TOKEN_FILE`, 그리고 아래 JSON 파일의 경로인 `ATE_PRODUCT_FIXTURE_FILE`을 제공한다. 파일 자체에는 토큰을 담지 않는다.
 
