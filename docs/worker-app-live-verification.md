@@ -34,7 +34,14 @@
 
 워커 변경 감지가 선택한 `main` 커밋은 Worker Platform의 `ATE integration`에서 `워커 앱 ARM64 검증 후보 빌드`를 실행한다. 워크플로, 이미지 레시피 또는 후보 패키징 스크립트가 변경된 PR도 같은 빌드와 검증을 실행한다. 아티팩트는 `main` 실행에서 보존한다. 같은 커밋을 다시 빌드하려면 워커 `main`의 수동 실행에서 `base`에 현재 `main` SHA를 입력하고 `build_worker_artifacts`를 켠다.
 
-`worker-app-arm64-<SHA>-<실행 시도 번호>` 아티팩트에는 Run API, 워커 컨트롤러, 공통 Actor 런타임의 OCI 아카이브와 Echo v1·실패 후보·v2의 OCI 레이아웃이 들어 있다. `source-revision.txt`, `images.txt`, `packages.txt`에서 SHA와 이미지·패키지 digest를 확인한다. API Platform `main`의 ARM64 빌드는 `build_worker_app_gateway=true` 옵션으로 Platform API·콘솔, Gateway 컨트롤러·런타임 번들을 보존할 수 있다. 각 아티팩트에서 `sha256sum -c SHA256SUMS`를 실행하고 승인된 시험 레지스트리의 digest를 대조한다. [API Platform ARM64 빌드](https://github.com/imprun/api-platform/actions/workflows/build-imprun-operator-oci.yml)
+`worker-app-arm64-<SHA>-<실행 시도 번호>` 아티팩트에는 Run API, 워커 컨트롤러, 공통 Actor 런타임의 OCI 아카이브와 Echo v1·실패 후보·v2의 OCI 레이아웃이 들어 있다. `sha256sum -c SHA256SUMS`로 파일을 확인하고 `source-revision.txt`, `images.txt`, `packages.txt`의 SHA와 digest를 배포 때 대조한다.
+
+API Platform의 기본 ARM64 빌드는 Actions 요약에 SHA와 digest를 남긴다. #4에 배포할 Platform API·콘솔과 Gateway 컨트롤러·런타임은 같은 러너에서 승인된 내부 OCI 레지스트리로 직접 게시한다. 레지스트리 접근이 준비되면 API Platform `main`에서 아래 작업을 실행한다. 두 게시 작업이 성공하면 요약에 기록된 같은 API SHA의 digest 고정 참조 네 개를 전용 환경에 배포한다. [API Platform 게시 절차](https://github.com/imprun/api-platform/tree/main/imprun/rollout/arc)
+
+```sh
+gh workflow run build-imprun-operator-oci.yml -R imprun/api-platform --ref main \
+  -f publish_worker_app_images=true
+```
 
 검토한 두 커밋을 전용 `wp-product-verification` 네임스페이스에 배포한다. Run API, 워커 컨트롤러, API Platform, 개발 Gateway Deployment에 `spec.template.metadata.annotations.imprun.dev/source-sha`와 이미지 digest를 고정한다. API Gateway 등록의 ID·버전 및 HTTPS 엔드포인트도 시험 구성과 일치해야 한다.
 
